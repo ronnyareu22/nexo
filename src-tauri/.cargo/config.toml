@@ -1,0 +1,3 @@
+# Compilar con 6 núcleos en vez de todos, para que la Mac no se caliente.
+[build]
+jobs = 6

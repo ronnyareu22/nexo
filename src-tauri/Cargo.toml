@@ -1,0 +1,36 @@
+[package]
+name = "nexo"
+version = "0.1.0"
+description = "Nexo: tus dispositivos en un solo panel"
+authors = ["Ronny Arellano"]
+edition = "2024"
+
+[lib]
+# El sufijo _lib evita un choque de nombres en Windows (cargo#8519).
+name = "nexo_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-notification = "2"
+
+# Mac: Bluetooth del sistema (IOBluetooth) para conectar y desconectar.
+# Mac: monitores externos por DDC/CI (también en chips Apple).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+ddc = "0.2"
+ddc-macos = "0.2"
+
+# App final lo más liviana posible: https://tauri.app/concept/size/
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

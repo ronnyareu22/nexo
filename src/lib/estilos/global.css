@@ -1,0 +1,384 @@
+/* Nexo: letra, colores (claro y oscuro), superficies y base. Brief: DISENO.md, secciones 4 y 11.
+   Paleta: turquesa (identidad y lo elegido), verde (conexión y batería), celeste (sonido) y amarillo (brillo).
+   Superficies sólidas, sin vidrio ni desenfoque. El hover solo cambia el color.
+   El tema sale del sistema, salvo que se elija en la app: <html data-theme="light|dark">. */
+
+/* Inter (variable, solo latín y latín extendido), servida desde la app. Licencia SIL OFL: fuentes/LICENCIA-Inter.txt */
+@font-face {
+  font-family: 'Inter';
+  src: url('/fuentes/inter-latin.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('/fuentes/inter-latin-ext.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF,
+    U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------- Oscuro (por defecto) ---------- */
+:root {
+  color-scheme: dark;
+
+  /* Identidad */
+  --primario: #00e6b8;
+  --primario-hover: #00c9a0;
+  --primario-texto: #00e6b8; /* turquesa legible como texto o ícono */
+  --sobre-primario: #04241d; /* texto sobre el primario */
+
+  /* Estados */
+  --exito: #22c55e;
+  --info: #3b82f6;
+  --aviso: #f59e0b;
+  --error: #ef4444;
+
+  /* Superficies y texto */
+  --fondo: #0b0f14;
+  --superficie: #141a26;
+  --superficie-elevada: #1b2431;
+  --superficie-hover: #222c3d;
+  --superficie-hundida: #0d121b; /* pistas del interruptor, el deslizador y el anillo */
+  --borde: rgb(255 255 255 / 0.08);
+  --borde-fuerte: rgb(255 255 255 / 0.16);
+  --texto: #e5eaf0;
+  --texto-2: #9aa6b5;
+  --texto-3: #64748b;
+
+  /* Acentos por familia: sonido y brillo (conexión y batería usan --exito) */
+  --celeste: #38bdf8;
+  --sobre-celeste: #04202e;
+  --amarillo: #fbbf24;
+  --amarillo-texto: #fbbf24;
+
+  /* Profundidad: los paneles casi sin sombra; lo que flota, una sola sombra suave */
+  --sombra-panel: 0 1px 2px rgb(0 0 0 / 0.22);
+  --sombra-flotante: 0 10px 30px -12px rgb(0 0 0 / 0.45);
+
+  --halo-foto: rgb(210 235 255 / 0.08);
+  --grafito-1: #4a5466;
+  --grafito-2: #232a35;
+  --grafito-3: #12161c;
+
+  /* ----- Alias que usan los componentes (se resuelven con los valores del tema) ----- */
+  --bg: var(--fondo);
+  --verde: var(--exito);
+  --rojo: var(--error);
+  --peligro: var(--error);
+  --acento: var(--primario);
+  --acento-2: var(--primario-hover);
+  --acento-suave: color-mix(in srgb, var(--primario) 9%, transparent);
+  --texto-suave: var(--texto-2);
+  --texto-tenue: var(--texto-3);
+  --linea: var(--borde);
+  --linea-fuerte: var(--borde-fuerte);
+
+  /* El vidrio ya no existe: estos nombres apuntan a la superficie sólida. */
+  --vidrio: var(--superficie);
+  --vidrio-fuerte: var(--superficie-elevada);
+  --vidrio-borde-alto: var(--borde);
+  --vidrio-borde-bajo: var(--borde);
+  --vidrio-brillo: 0 0 #0000;
+  --vidrio-sombra: var(--sombra-panel);
+
+  /* Fondo de la ventana: liso. Las luces quedan transparentes. */
+  --luz-1: transparent;
+  --luz-2: transparent;
+  --luz-3: transparent;
+
+  /* Aurora: resplandor suave y quieto detrás de la mascota, al pie de la barra lateral y detrás de la foto
+     del aparato. Solo degradados radiales pintados una vez: sin desenfoque, sin animación, sin transparencia de paneles. */
+  --aurora-1: rgb(0 230 184 / 0.18); /* turquesa */
+  --aurora-2: rgb(59 130 246 / 0.16); /* azul */
+  --aurora-3: rgb(56 189 248 / 0.1); /* celeste */
+
+  /* Lo elegido: relleno turquesa suave, borde fino turquesa y texto turquesa legible. Sin brillo. */
+  --elegido-bg: color-mix(in srgb, var(--primario) 14%, var(--superficie));
+  --elegido-fg: var(--primario-texto);
+  --elegido-borde: color-mix(in srgb, var(--primario) 35%, transparent);
+  --elegido-canto: var(--elegido-borde);
+  --elegido-luz: 0 0 #0000;
+
+  /* Logo */
+  --canto: linear-gradient(135deg, #5cf2d4, var(--primario) 50%, #00a383);
+
+  /* Forma */
+  --radio-xl: 26px;
+  --radio-lg: 22px;
+  --radio-md: 16px;
+  --radio-sm: 12px;
+  --radio-pildora: 99px;
+
+  --foco: 0 0 0 2px var(--fondo), 0 0 0 4px var(--primario);
+  --fuente: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+
+  /* Movimiento (DISENO.md 4.4) */
+  --dur-color: 120ms;
+  --dur-vista: 220ms;
+  --rapido: 160ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --resorte: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ---------- Claro: elegido en la app, o del sistema si no se eligió oscuro ---------- */
+[data-theme='light'] {
+  color-scheme: light;
+  --primario: #00b894;
+  --primario-hover: #009e80;
+  --primario-texto: #00876d;
+  --sobre-primario: #04241d;
+  --exito: #16a34a;
+  --info: #2563eb;
+  --aviso: #b45309;
+  --error: #dc2626;
+  --fondo: #f5f7fb;
+  --superficie: #ffffff;
+  --superficie-elevada: #f0f3f8;
+  --superficie-hover: #e9eef5;
+  --superficie-hundida: #e4e9f0;
+  --borde: #e2e8f0;
+  --borde-fuerte: #cbd5e1;
+  --texto: #172033;
+  --texto-2: #64748b;
+  --texto-3: #94a3b8;
+  --celeste: #0284c7;
+  --sobre-celeste: #ffffff;
+  --amarillo: #d97706;
+  --amarillo-texto: #b45309;
+  --sombra-panel: 0 1px 2px rgb(15 23 42 / 0.04);
+  --sombra-flotante: 0 10px 30px -12px rgb(15 23 42 / 0.2);
+  --halo-foto: rgb(255 255 255 / 0.9);
+  --canto: linear-gradient(135deg, #2fd9b4, var(--primario) 50%, #00876d);
+  --aurora-1: rgb(0 184 148 / 0.16);
+  --aurora-2: rgb(59 130 246 / 0.12);
+  --aurora-3: rgb(56 189 248 / 0.12);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --primario: #00b894;
+    --primario-hover: #009e80;
+    --primario-texto: #00876d;
+    --sobre-primario: #04241d;
+    --exito: #16a34a;
+    --info: #2563eb;
+    --aviso: #b45309;
+    --error: #dc2626;
+    --fondo: #f5f7fb;
+    --superficie: #ffffff;
+    --superficie-elevada: #f0f3f8;
+    --superficie-hover: #e9eef5;
+    --superficie-hundida: #e4e9f0;
+    --borde: #e2e8f0;
+    --borde-fuerte: #cbd5e1;
+    --texto: #172033;
+    --texto-2: #64748b;
+    --texto-3: #94a3b8;
+    --celeste: #0284c7;
+    --sobre-celeste: #ffffff;
+    --amarillo: #d97706;
+    --amarillo-texto: #b45309;
+    --sombra-panel: 0 1px 2px rgb(15 23 42 / 0.04);
+    --sombra-flotante: 0 10px 30px -12px rgb(15 23 42 / 0.2);
+    --halo-foto: rgb(255 255 255 / 0.9);
+    --canto: linear-gradient(135deg, #2fd9b4, var(--primario) 50%, #00876d);
+    --aurora-1: rgb(0 184 148 / 0.16);
+    --aurora-2: rgb(59 130 246 / 0.12);
+    --aurora-3: rgb(56 189 248 / 0.12);
+  }
+}
+
+/* Más contraste (ajuste del sistema): bordes firmes y texto tenue más legible, en los dos temas.
+   Va después de los temas y con su misma especificidad para ganarles. */
+@media (prefers-contrast: more) {
+  :root,
+  [data-theme],
+  :root:not([data-theme='dark']) {
+    --borde: color-mix(in srgb, var(--texto) 32%, transparent);
+    --texto-3: var(--texto-2);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: var(--fuente);
+  font-size: 14px;
+  line-height: 1.45;
+  font-feature-settings: 'cv11', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible,
+[tabindex]:not([tabindex='-1']):focus-visible {
+  outline: none;
+  box-shadow: var(--foco);
+}
+
+/* Rótulo de panel: versalitas pequeñas (DISENO.md 4.2). */
+.rotulo {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--texto-3);
+}
+
+/* Panel estándar (el nombre "vidrio" se queda porque lo usan muchos componentes):
+   superficie sólida, borde fino y una sombra casi invisible. El borde va por dentro para no mover nada. */
+.vidrio {
+  position: relative;
+  background: var(--superficie);
+  box-shadow:
+    inset 0 0 0 1px var(--borde),
+    var(--sombra-panel);
+}
+
+/* Lo que flota sobre el contenido (menús, tooltip): superficie elevada sólida y una sola sombra suave. */
+.flotante {
+  background: var(--superficie-elevada);
+  border: 1px solid var(--borde);
+  box-shadow: var(--sombra-flotante);
+}
+
+.boton-vidrio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: var(--radio-sm);
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background-color var(--dur-color) ease,
+    color var(--dur-color) ease;
+}
+
+/* Acción principal de una pantalla. */
+.boton-primario {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radio-sm);
+  background: var(--primario);
+  color: var(--sobre-primario);
+  font-size: 13px;
+  font-weight: 650;
+  transition: background-color var(--dur-color) ease;
+}
+.boton-primario:hover:not(:disabled) {
+  background: var(--primario-hover);
+}
+
+/* Botón redondo de la barra de arriba (Actualizar, tema): superficie con borde; el hover solo cambia el color. */
+.boton-redondo {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--borde);
+  border-radius: 50%;
+  background: var(--superficie);
+  color: var(--texto-2);
+  transition:
+    background-color var(--dur-color) ease,
+    color var(--dur-color) ease;
+}
+.boton-redondo:hover {
+  background: var(--superficie-hover);
+  color: var(--texto);
+}
+.boton-redondo:active {
+  transform: scale(0.98);
+}
+
+/* Hover de los botones de superficie: solo cambia el color, nada se mueve. */
+:is(button, a).vidrio:not(:disabled, .elegido):hover {
+  background: var(--superficie-hover);
+}
+
+/* Lo elegido: relleno turquesa suave, borde fino y texto turquesa. Sin canto irisado ni brillo. */
+.elegido {
+  color: var(--elegido-fg);
+  background: var(--elegido-bg);
+  border: 1px solid var(--elegido-borde);
+  box-shadow: none;
+}
+
+/* Tooltip propio (lib/tooltip.ts): uno solo para toda la app; aparece y se va con un fundido. */
+.tooltip {
+  position: fixed;
+  z-index: 60;
+  left: 0;
+  top: 0;
+  max-width: 260px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--texto);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-color) ease;
+}
+.tooltip.visible {
+  opacity: 1;
+}
+
+/* Texto solo para lectores de pantalla. */
+.solo-lector {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

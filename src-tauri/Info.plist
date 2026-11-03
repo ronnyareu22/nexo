@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- macOS muestra este texto al pedir permiso de Bluetooth. -->
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>Nexo usa Bluetooth para mostrar tus dispositivos, su batería y conectarlos.</string>
+</dict>
+</plist>

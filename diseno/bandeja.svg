@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Ícono de una sola tinta para la barra de menús (macOS lo pinta en blanco o negro solo). -->
+  <circle cx="512" cy="512" r="380" fill="none" stroke="#000" stroke-width="60"/>
+  <g stroke="#000" stroke-width="70" stroke-linecap="round">
+    <line x1="512" y1="512" x2="512" y2="150"/>
+    <line x1="512" y1="512" x2="198" y2="693"/>
+    <line x1="512" y1="512" x2="826" y2="693"/>
+  </g>
+  <g fill="#000">
+    <circle cx="512" cy="132" r="110"/>
+    <circle cx="183" cy="702" r="110"/>
+    <circle cx="841" cy="702" r="110"/>
+    <circle cx="512" cy="512" r="170"/>
+  </g>
+</svg>
