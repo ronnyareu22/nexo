@@ -934,8 +934,9 @@ static ESCRITO_POR_NEXO: Mutex<Option<Instant>> = Mutex::new(None);
 const ECO_NEXO: Duration = Duration::from_secs(1);
 /// Mientras el portátil vuelve a su nivel, los avisos que se acercan a ese nivel son de Nexo (no son teclas).
 const ECO_REGRESO: Duration = Duration::from_millis(1500);
-/// El portátil vuelve a su nivel cuando dejas de presionar por este tiempo (una sola vez, no en cada toque).
-const PAUSA_REGRESO: Duration = Duration::from_millis(450);
+/// El portátil vuelve a su nivel enseguida tras cada toque, para que la pantalla principal casi no se note
+/// (el eco de ese regreso ya no se confunde con otra tecla).
+const PAUSA_REGRESO: Duration = Duration::from_millis(0);
 /// Una tecla mueve el portátil de 3 a 25 puntos (Windows usa 10; algunos, 5). Menos es el brillo automático;
 /// más, el plan de energía al enchufar o desenchufar. Esos no pasan al monitor.
 const TOQUE: std::ops::RangeInclusive<i32> = 3..=25;
