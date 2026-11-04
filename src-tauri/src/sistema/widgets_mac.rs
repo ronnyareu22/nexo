@@ -83,7 +83,8 @@ mod mac {
 
     pub fn actualizar(app: &AppHandle, bluetooth: bool, dispositivos: Option<&[Dispositivo]>) {
         // Pantallas: la principal primero (es la que muestra el widget pequeño).
-        let mut pantallas = app.state::<Arc<Pantallas>>().listar();
+        // Sin la pantalla virtual de RustDesk: no es una pantalla que se vea en la casa.
+        let mut pantallas: Vec<_> = app.state::<Arc<Pantallas>>().listar().into_iter().filter(|p| !p.es_virtual).collect();
         pantallas.sort_by_key(|p| !p.principal);
         let orden: Vec<u32> = pantallas.iter().map(|p| p.id).collect();
         let lista_pantallas: Vec<PantallaWidget> = pantallas

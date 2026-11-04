@@ -9,6 +9,8 @@
 //! Los monitores externos tienen un brillo mínimo (10 % si no se eligió otro): el 0 % de Nexo es ese mínimo,
 //! así ningún camino (panel, teclas, menú, escenas, widgets) baja al nivel en que el monitor parpadea.
 //! Los demás ajustes del monitor (contraste, color, entrada…) también pasan por el hilo: ver `vcp.rs`.
+//! La pantalla virtual de Nexo (Mac, `sistema/pantalla_virtual.rs`) sale en la lista como "virtual": sin brillo
+//! y fuera de la búsqueda de DDC/CI (no es un monitor de verdad).
 
 #[path = "vcp.rs"]
 pub mod vcp;
@@ -29,6 +31,9 @@ pub struct Pantalla {
     pub controlable: bool,
     /// La pantalla principal: la que tiene la barra de menús.
     pub principal: bool,
+    /// Mac: la pantalla virtual de Nexo para RustDesk (sin brillo ni DDC/CI).
+    #[serde(rename = "virtual")]
+    pub es_virtual: bool,
 }
 
 /// Cómo responde una pantalla a las teclas de brillo (se guarda por pantalla en los ajustes).
@@ -483,6 +488,7 @@ fn trabajador(
 #[cfg(target_os = "macos")]
 mod mac {
     use super::{ModoPantalla, NO_RESPONDE, Pantalla, Sistema, minimo_en, vcp};
+    use crate::sistema::pantalla_virtual;
     use ddc::Ddc;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -568,8 +574,10 @@ mod mac {
         }
 
         /// Busca monitores externos nuevos (y olvida los desconectados). Solo lee DDC de los nuevos.
+        /// La pantalla virtual de Nexo no cuenta: no tiene DDC y, si contara, se buscaría en cada lectura.
         fn buscar(&mut self) {
-            let activos: Vec<u32> = ids_activos().into_iter().filter(|id| !es_interna(*id)).collect();
+            let activos: Vec<u32> =
+                ids_activos().into_iter().filter(|id| !es_interna(*id) && !pantalla_virtual::es_nuestra(*id)).collect();
             self.externos.retain(|id, _| activos.contains(id));
             self.memorias.retain(|id, _| activos.contains(id));
             if activos.iter().all(|id| self.externos.contains_key(id)) {
@@ -623,6 +631,17 @@ mod mac {
                             brillo,
                             controlable: brillo.is_some() && display_services().poner.is_some(),
                             principal: es_principal(id),
+                            es_virtual: false,
+                        }
+                    } else if pantalla_virtual::es_nuestra(id) {
+                        Pantalla {
+                            id,
+                            nombre: pantalla_virtual::NOMBRE.into(),
+                            interna: false,
+                            brillo: None,
+                            controlable: false,
+                            principal: es_principal(id),
+                            es_virtual: true,
                         }
                     } else if let Some(e) = self.externos.get(&id) {
                         Pantalla {
@@ -632,6 +651,7 @@ mod mac {
                             brillo: Some(e.porcentaje()),
                             controlable: true,
                             principal: es_principal(id),
+                            es_virtual: false,
                         }
                     } else {
                         Pantalla {
@@ -641,11 +661,13 @@ mod mac {
                             brillo: None,
                             controlable: false,
                             principal: es_principal(id),
+                            es_virtual: false,
                         }
                     }
                 })
                 .collect();
-            lista.sort_by_key(|p| !p.interna);
+            // La integrada primero y la virtual al final.
+            lista.sort_by_key(|p| (!p.interna, p.es_virtual));
             lista
         }
 

@@ -432,7 +432,7 @@
                     <span class="pantalla__nombre">{p.nombre}</span>
                     <span class="pantalla__linea">
                       <span class="punto" aria-hidden="true"></span>
-                      {p.interna ? 'Pantalla integrada' : 'Monitor externo'}
+                      {p.interna ? 'Pantalla integrada' : p.virtual ? 'Pantalla virtual' : 'Monitor externo'}
                     </span>
                   </span>
                   {#if p.controlable && brillo !== null}
@@ -446,7 +446,7 @@
                       </button>
                     </span>
                   {:else}
-                    <span class="pantalla__nota">Brillo no disponible</span>
+                    <span class="pantalla__nota">{p.virtual ? 'Para RustDesk' : 'Brillo no disponible'}</span>
                   {/if}
                   <span class="chevron" aria-hidden="true"><Icono nombre="chevron" tamano={16} /></span>
                 </div>

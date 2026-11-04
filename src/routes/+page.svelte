@@ -1,7 +1,8 @@
 <!--
   La ventana de Nexo: barra lateral a la izquierda (los botones de macOS quedan encima de ella) y, a la derecha,
   una fila fina con el buscador global, Actualizar y el botón de tema, y debajo la vista.
-  Aquí se cargan los datos y se pasan a las vistas: aparatos y pantallas cada 5 s (solo con el panel a la vista),
+  Aquí se cargan los datos y se pasan a las vistas: aparatos y pantallas cada 5 s (solo con el panel a la vista,
+  y enseguida si cambia la pantalla virtual),
   el nombre del usuario una vez y el brillo 4 veces por segundo solo en Inicio y Pantallas.
   Para revisar el diseño: `?ver=<id>` abre Dispositivos con ese aparato en el panel, `?pagina=<id>` abre su
   página completa y `?seccion=<id>` abre una sección. El widget de escritorio abre el panel con esas mismas
@@ -15,6 +16,7 @@
   import { onMount, untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import { cambiarConexion, leerBrillos, leerNombreUsuario, listarDispositivos, listarPantallas } from '$lib/api';
+  import { alCambiarPantallaVirtual } from '$lib/api-pantalla-virtual';
   import {
     alPedirSeccion,
     avisarTemaAlWidget,
@@ -269,6 +271,10 @@
       if (document.visibilityState === 'visible' && !pendienteId) actualizar();
     };
     document.addEventListener('visibilitychange', alVolver);
+    // La pantalla virtual se creó, cambió o se quitó (panel, menú del ícono o sesión remota): la lista, enseguida.
+    const dejarVirtual = alCambiarPantallaVirtual(() => {
+      if (!pendienteId) actualizar();
+    });
     // Mac: si al volver a la ventana falta un permiso obligatorio, Nexo se bloquea de nuevo hasta que vuelva.
     const alEnfocar = async () => {
       if (await faltaPermiso()) entrada = 'permisos';
@@ -277,6 +283,7 @@
     return () => {
       clearInterval(intervalo);
       document.removeEventListener('visibilitychange', alVolver);
+      dejarVirtual();
       window.removeEventListener('focus', alEnfocar);
     };
   });

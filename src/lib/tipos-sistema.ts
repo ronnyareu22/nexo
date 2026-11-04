@@ -87,6 +87,27 @@ export interface AtajoRemoto {
 
 export type EstadoTailscale = 'activo' | 'detenido' | 'no instalado';
 
+/** `pantalla_virtual_estado`: la segunda pantalla de la Mac para verla en otra ventana de RustDesk. */
+export interface EstadoPantallaVirtual {
+  /** Existe ahora mismo. */
+  activa: boolean;
+  /** La resolución en uso o, si no existe, la que tendrá. */
+  ancho: number;
+  alto: number;
+  /** Este macOS deja crearla (en Windows, nunca). */
+  disponible: boolean;
+  /** Su número de pantalla en macOS, mientras existe. */
+  id: number | null;
+  quitarAlTerminar: boolean;
+  crearAlEmpezar: boolean;
+}
+
+/** Lo que cambia `pantalla_virtual_ajustar`; lo que no viene, queda igual. */
+export interface CambioPantallaVirtual {
+  quitarAlTerminar?: boolean;
+  crearAlEmpezar?: boolean;
+}
+
 /** `remoto_estado`: la sesión de RustDesk, Tailscale, los ajustes y la tabla de atajos. */
 export interface EstadoRemoto {
   activa: boolean;

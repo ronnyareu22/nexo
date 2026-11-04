@@ -135,6 +135,8 @@ export interface Pantalla {
   interna: boolean;
   brillo: number | null;
   controlable: boolean;
+  /** Mac: la pantalla virtual de Nexo para RustDesk (sin brillo ni ajustes del monitor). */
+  virtual?: boolean;
 }
 
 /** Un atajo de Windows: la tecla (código virtual, VK) y sus modificadores. */

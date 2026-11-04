@@ -1,6 +1,7 @@
 //! Menú del ícono (barra de menús en la Mac, bandeja en Windows): accesos rápidos que siempre están a mano.
 //!
 //! - Orden: captura y XDrop, escenas, sonido, brillo, aparatos, remoto y, al final, abrir, widget y salir.
+//!   En el remoto de la Mac va la casilla de la pantalla virtual para RustDesk.
 //! - Abrirlo no lee nada: se arma con lo que ya se sabe. Los aparatos los trae el vigía de lib.rs (cada 20 s) y
 //!   los destinos de XDrop son los de la última búsqueda (al arrancar, cada 2 min o cuando el panel los pide).
 //! - Se pone al día cuando cambia lo que muestra: en cada vuelta del vigía, tras cada acción del menú, al terminar
@@ -10,7 +11,7 @@
 //!   y avisan cómo salieron con una notificación.
 //! - Sin atajos globales nuevos: en la Mac la captura ya tiene F13.
 
-use super::{ajustes, aviso, drop as xdrop, escenas, remoto, teclas, widget, widget_brillo};
+use super::{ajustes, aviso, drop as xdrop, escenas, pantalla_virtual, remoto, teclas, widget, widget_brillo};
 use crate::dispositivos::audio::{self, Cambio, DispositivoAudio};
 use crate::dispositivos::historial::Historial;
 use crate::dispositivos::pantallas::{Pantalla, Pantallas};
@@ -221,6 +222,8 @@ struct Datos {
     widgets: Vec<(u32, String, bool)>,
     aparatos: Option<(bool, Vec<Dispositivo>)>,
     ocupados: Vec<(String, bool)>,
+    /// Mac: la pantalla virtual para RustDesk existe (`None` si este macOS no deja crearla).
+    pantalla_virtual: Option<bool>,
 }
 
 impl Datos {
@@ -237,6 +240,7 @@ impl Datos {
             widgets: Vec::new(),
             aparatos: None,
             ocupados: Vec::new(),
+            pantalla_virtual: None,
         }
     }
 
@@ -263,6 +267,7 @@ impl Datos {
             widgets,
             aparatos: bloquear(&APARATOS).clone(),
             ocupados: bloquear(&OCUPADOS).clone(),
+            pantalla_virtual: pantalla_virtual::en_menu(),
             ..Datos::vacios()
         }
     }
@@ -336,6 +341,9 @@ fn armar(d: &Datos) -> Vec<Pieza> {
     if d.mac {
         m.push(Pieza::Raya);
         m.push(item("preparar", "Preparar para el trabajo"));
+        if let Some(marcada) = d.pantalla_virtual {
+            m.push(Pieza::Casilla { id: "pantalla-virtual".into(), texto: "Pantalla virtual para RustDesk".into(), marcada });
+        }
     } else if d.windows {
         m.push(Pieza::Raya);
         m.push(item("conectar-mac", "Conectar a mi Mac"));
@@ -634,6 +642,7 @@ async fn accion(app: AppHandle, id: String) {
         "brillo-subir" => poner_brillo(&app, Brillo::Subir).await,
         "bt" => aparato(&app, resto).await,
         "preparar" => preparar(&app).await,
+        "pantalla-virtual" => usar_pantalla_virtual(&app).await,
         "conectar-mac" => {
             if let Err(e) = remoto::remoto_conectar_mac().await {
                 avisar(&app, "No se pudo conectar a tu Mac", &e);
@@ -845,6 +854,15 @@ async fn preparar(app: &AppHandle) {
     }
 }
 
+/// "Pantalla virtual para RustDesk": la crea o la quita. La marca vuelve a lo real (el clic ya la cambió).
+async fn usar_pantalla_virtual(app: &AppHandle) {
+    let a = app.clone();
+    if let Some(Err(e)) = en_hilo(move || pantalla_virtual::alternar(&a)).await {
+        avisar(app, "No se pudo cambiar la pantalla virtual", &e);
+    }
+    actualizar_marcas(app);
+}
+
 #[cfg(test)]
 mod pruebas {
     use super::*;
@@ -922,6 +940,7 @@ mod pruebas {
                 brillo: Some(40),
                 controlable: true,
                 principal: true,
+                es_virtual: false,
             }),
             widgets: vec![(1, "Pantalla de la MacBook".into(), false), (2, "MNT-027".into(), true)],
             aparatos: Some((
@@ -932,6 +951,7 @@ mod pruebas {
                 ],
             )),
             ocupados: Vec::new(),
+            pantalla_virtual: Some(false),
         }
     }
 
@@ -958,6 +978,7 @@ mod pruebas {
                 "bt:0:E8-9E",
                 "-",
                 "preparar",
+                "pantalla-virtual",
                 "-",
                 "abrir",
                 "widget",
@@ -965,6 +986,11 @@ mod pruebas {
             ]
         );
         assert!(matches!(&m[0], Pieza::Item { atajo: Some("F13"), .. }));
+        assert_eq!(texto_de(&m, "pantalla-virtual"), Some("Pantalla virtual para RustDesk"));
+        // Encendida: misma forma, solo cambia la marca.
+        let encendida = armar(&Datos { pantalla_virtual: Some(true), ..mac_completa() });
+        assert!(misma_forma(&m, &encendida));
+        assert!(matches!(encendida.iter().find(|p| llave(p) == (1, "pantalla-virtual")), Some(Pieza::Casilla { marcada: true, .. })));
         assert_eq!(texto_de(&m, "xdrop-captura:100.64.0.2"), Some("Enviar captura a innotech1017"));
         assert_eq!(texto_de(&m, "salida"), Some("Salida: Sony WH-CH520"));
         assert_eq!(texto_de(&m, "silencio"), Some("Silenciar"));
@@ -977,7 +1003,7 @@ mod pruebas {
     fn bandeja_windows_sin_lo_de_la_mac() {
         let m = armar(&Datos { mac: false, windows: true, ..mac_completa() });
         let lista = ids(&m);
-        assert!(!lista.iter().any(|i| i == "captura" || i == "carpeta-capturas" || i == "preparar"));
+        assert!(!lista.iter().any(|i| i == "captura" || i == "carpeta-capturas" || i == "preparar" || i == "pantalla-virtual"));
         assert!(!lista.iter().any(|i| i.starts_with("xdrop-captura")));
         assert_eq!(lista[0], "xdrop-copiado:100.64.0.2");
         assert!(lista.iter().any(|i| i == "conectar-mac"));

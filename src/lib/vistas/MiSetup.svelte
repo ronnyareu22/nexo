@@ -129,8 +129,11 @@
     return {
       ...setup.local,
       dispositivos: estado.dispositivos.map(aAparato),
+      // La pantalla virtual de RustDesk no va en el mapa: no está en el escritorio.
       pantallas: pantallas.length
-        ? pantallas.map((p) => ({ id: p.id, nombre: p.nombre, interna: p.interna, brillo: p.brillo }))
+        ? pantallas
+            .filter((p) => !p.virtual)
+            .map((p) => ({ id: p.id, nombre: p.nombre, interna: p.interna, brillo: p.brillo }))
         : setup.local.pantallas,
     };
   });

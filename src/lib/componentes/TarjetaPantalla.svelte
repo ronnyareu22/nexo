@@ -2,15 +2,25 @@
      en grande con su barra (el tono va de ámbar tenue a amarillo intenso), − y + y accesos rápidos.
      Debajo: resolución, frecuencia, "Hacer principal", el widget de brillo de esta pantalla y, en los monitores
      externos, "Ajustes del monitor" (brillo mínimo y lo que el monitor deja cambiar por DDC/CI).
-     El cambio de modo lo confirma quien la usa (Pantallas.svelte), que vuelve al anterior si no se confirma. -->
+     El cambio de modo lo confirma quien la usa (Pantallas.svelte), que vuelve al anterior si no se confirma.
+     La pantalla virtual de RustDesk (Mac) va con la ilustración del monitor y el chip "Virtual": sin brillo, con sus
+     resoluciones fijas (se cambian al instante, sin confirmar) y "Quitar". -->
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ponerBrillo } from '$lib/api';
   import { esMac } from '$lib/api-sistema';
+  import {
+    alCambiarPantallaVirtual,
+    claveResolucion,
+    leerPantallaVirtual,
+    opcionesResolucionVirtual,
+    resolucionDe,
+    usarPantallaVirtual,
+  } from '$lib/api-pantalla-virtual';
   import { enviadorDelUltimo } from '$lib/enviador';
   import { pasoDeBrillo, tonoDeBrillo } from '$lib/brillo';
   import type { Pantalla } from '$lib/tipos';
-  import type { ModoPantalla } from '$lib/tipos-sistema';
+  import type { EstadoPantallaVirtual, ModoPantalla } from '$lib/tipos-sistema';
   import { fotoDePantalla } from '$lib/catalogo';
   import AjustesMonitor from './AjustesMonitor.svelte';
   import Ilustracion from './Ilustracion.svelte';
@@ -89,6 +99,11 @@
   );
   const conBrillo = $derived(p.controlable && p.brillo !== null);
 
+  // La pantalla virtual de RustDesk (Mac): su estado lo da Nexo (resolución) y se lee abajo.
+  const esVirtual = $derived(p.virtual === true);
+  let virtual = $state<EstadoPantallaVirtual | null>(null);
+  let cambiandoVirtual = $state<'resolucion' | 'quitar' | null>(null);
+
   // --- Modos: agrupados por tamaño; cada tamaño con sus frecuencias. ---
   interface Tamano {
     clave: string;
@@ -134,11 +149,14 @@
   );
 
   const resumen = $derived(
-    [
-      p.interna ? 'Pantalla integrada' : 'Monitor externo',
-      actual ? `${actual.ancho} × ${actual.alto}` : '',
-      actual && actual.hz > 0 ? `${numero.format(actual.hz)} Hz` : '',
-    ]
+    (p.virtual
+      ? ['Pantalla virtual', virtual ? `${virtual.ancho} × ${virtual.alto}` : '', '60 Hz']
+      : [
+          p.interna ? 'Pantalla integrada' : 'Monitor externo',
+          actual ? `${actual.ancho} × ${actual.alto}` : '',
+          actual && actual.hz > 0 ? `${numero.format(actual.hz)} Hz` : '',
+        ]
+    )
       .filter(Boolean)
       .join(' · '),
   );
@@ -156,6 +174,44 @@
     const modo = modos?.find((m) => String(m.id) === valor);
     if (modo && onmodo && !ocupada) onmodo(modo, 'frecuencia');
   }
+
+  // --- Pantalla virtual (Mac): su resolución sale de Nexo, no de la lista de modos. ---
+  $effect(() => {
+    if (!esVirtual) return;
+    untrack(() =>
+      leerPantallaVirtual()
+        .then((e) => (virtual = e))
+        .catch(() => {}),
+    );
+    return alCambiarPantallaVirtual((e) => (virtual = e));
+  });
+  const claveVirtual = $derived(
+    virtual ? claveResolucion(virtual.ancho, virtual.alto) : actual ? claveResolucion(actual.ancho, actual.alto) : '',
+  );
+
+  async function resolucionVirtual(clave: string) {
+    const r = resolucionDe(clave);
+    if (!r || cambiandoVirtual) return;
+    cambiandoVirtual = 'resolucion';
+    try {
+      virtual = await usarPantallaVirtual(true, r.ancho, r.alto);
+    } catch (e) {
+      onerror(String(e));
+    }
+    cambiandoVirtual = null;
+  }
+
+  // Al quitarla, la lista de pantallas se relee sola (aviso "pantalla-virtual-cambio") y esta tarjeta se va.
+  async function quitarVirtual() {
+    if (cambiandoVirtual) return;
+    cambiandoVirtual = 'quitar';
+    try {
+      virtual = await usarPantallaVirtual(false);
+    } catch (e) {
+      onerror(String(e));
+    }
+    cambiandoVirtual = null;
+  }
 </script>
 
 <article class="tarjeta vidrio" aria-label={p.nombre} style:--tono={tono} style:--luz={conBrillo ? brillo / 100 : 0.6}>
@@ -166,7 +222,7 @@
         {#if fotoDePantalla(p)}
           <img src={fotoDePantalla(p)} alt="" draggable="false" />
         {:else}
-          <Ilustracion tipo={p.interna ? 'portatil' : 'monitor'} encendido={p.controlable} />
+          <Ilustracion tipo={p.interna ? 'portatil' : 'monitor'} encendido={p.controlable || esVirtual} />
         {/if}
       </div>
     </div>
@@ -176,6 +232,7 @@
         <div class="nombre-linea">
           <h2 class="nombre">{p.nombre}</h2>
           {#if varias && principal}<span class="chip-principal">Principal</span>{/if}
+          {#if esVirtual}<span class="chip-virtual">Virtual</span>{/if}
         </div>
         <p class="tipo">{resumen}</p>
       </div>
@@ -213,6 +270,25 @@
             {/each}
           </div>
         </div>
+      {:else if esVirtual}
+        <div class="nota">
+          <span class="nota__icono"><Icono nombre="pantallas" tamano={17} /></span>
+          <div class="nota__cuerpo">
+            <p>
+              La segunda pantalla de tu Mac para <b>RustDesk</b>. No tiene brillo: la ves en otra ventana de RustDesk, en
+              tu otro monitor de la oficina.
+            </p>
+            <button
+              class="boton-vidrio boton"
+              type="button"
+              disabled={cambiandoVirtual !== null}
+              aria-busy={cambiandoVirtual === 'quitar'}
+              onclick={quitarVirtual}
+            >
+              {cambiandoVirtual === 'quitar' ? 'Quitando…' : 'Quitar'}
+            </button>
+          </div>
+        </div>
       {:else if !p.interna}
         <div class="nota">
           <span class="nota__icono"><Icono nombre="info" tamano={17} /></span>
@@ -226,7 +302,24 @@
   </div>
 
   <div class="filas">
-    {#if tamanos.length > 0}
+    {#if esVirtual}
+      <div class="fila">
+        <div class="textos">
+          <span class="fila__rotulo">Resolución</span>
+          <span class="ayuda">
+            {cambiandoVirtual === 'resolucion' ? 'Cambiando…' : 'A 60 Hz y sin Retina: pesa poco en la conexión.'}
+          </span>
+        </div>
+        <div class="fila__menu">
+          <MenuDesplegable
+            opciones={opcionesResolucionVirtual}
+            valor={claveVirtual}
+            etiqueta="Resolución de la pantalla virtual"
+            oncambio={resolucionVirtual}
+          />
+        </div>
+      </div>
+    {:else if tamanos.length > 0}
       <div class="fila">
         <span class="fila__rotulo">Resolución</span>
         <div class="fila__menu">
@@ -240,7 +333,8 @@
       </div>
     {/if}
 
-    {#if frecuencias.length > 1}
+    <!-- La frecuencia de la pantalla virtual es fija (60 Hz): va en el resumen y en la ayuda de la resolución. -->
+    {#if !esVirtual && frecuencias.length > 1}
       <div class="fila">
         <span class="fila__rotulo">Frecuencia</span>
         <div class="fila__menu">
@@ -252,14 +346,15 @@
           />
         </div>
       </div>
-    {:else if frecuencias.length === 1}
+    {:else if !esVirtual && frecuencias.length === 1}
       <div class="fila">
         <span class="fila__rotulo">Frecuencia</span>
         <span class="fila__valor">{opcionesFrecuencia[0].nombre}</span>
       </div>
     {/if}
 
-    {#if varias && !principal && onprincipal}
+    <!-- La virtual no se ofrece como principal: la barra de menús quedaría donde solo se ve por RustDesk. -->
+    {#if varias && !principal && onprincipal && !esVirtual}
       <div class="fila">
         <div class="textos">
           <span class="fila__rotulo">Pantalla principal</span>
@@ -382,6 +477,19 @@
     color: var(--elegido-fg);
     background: var(--elegido-bg);
     box-shadow: inset 0 0 0 1px var(--elegido-borde);
+  }
+  /* "Virtual": en el tono de información, para que no se confunda con lo elegido. */
+  .chip-virtual {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 9px;
+    border-radius: var(--radio-pildora);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--info);
+    background: color-mix(in srgb, var(--info) 12%, var(--superficie));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info) 35%, transparent);
   }
   .tipo {
     margin: 2px 0 0;
@@ -552,6 +660,13 @@
   .nota b {
     color: var(--texto);
     font-weight: 600;
+  }
+  .nota__cuerpo {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    min-width: 0;
   }
 
   .boton {

@@ -255,6 +255,9 @@ pub fn run() {
             sistema::remoto::portapapeles_historial,
             sistema::remoto::portapapeles_copiar,
             sistema::remoto::portapapeles_borrar,
+            sistema::pantalla_virtual::pantalla_virtual_estado,
+            sistema::pantalla_virtual::pantalla_virtual,
+            sistema::pantalla_virtual::pantalla_virtual_ajustar,
             sistema::drop::drop_destinos,
             sistema::drop::drop_enviar,
             sistema::drop::drop_cancelar,
@@ -313,6 +316,8 @@ pub fn run() {
             app.manage(pantallas.clone());
             // Remoto (Mac): vigía de la sesión de RustDesk, atajos de Windows, captura con F13 y portapapeles liviano.
             sistema::remoto::iniciar(app.handle());
+            // Mac: la pantalla virtual para RustDesk vuelve si quedó activa.
+            sistema::pantalla_virtual::iniciar(app.handle());
             // Nexo Drop: el receptor escucha solo en la dirección de Tailscale (puerto 47821).
             sistema::drop::iniciar(app.handle());
             // Windows: busca versiones nuevas en la Mac a los 20 s y cada 30 min.

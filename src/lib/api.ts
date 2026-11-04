@@ -1,6 +1,7 @@
 // Llamadas a la parte de Rust.
 // Fuera de la app (por ejemplo `pnpm preview` en el navegador) usa datos de ejemplo para ver el diseño.
 import { invoke } from '@tauri-apps/api/core';
+import { pantallasVirtualesEjemplo } from './api-pantalla-virtual';
 import type {
   Atajo,
   Automatico,
@@ -66,7 +67,7 @@ export const leerNombreUsuario = (): Promise<string> =>
   enApp ? invoke<string>('nombre_usuario') : Promise.resolve('Ronny');
 
 export const listarPantallas = (): Promise<Pantalla[]> =>
-  enApp ? invoke<Pantalla[]>('listar_pantallas') : Promise.resolve(pantallasEjemplo);
+  enApp ? invoke<Pantalla[]>('listar_pantallas') : Promise.resolve([...pantallasEjemplo, ...pantallasVirtualesEjemplo()]);
 
 export const ponerBrillo = (id: number, valor: number): Promise<number> =>
   enApp ? invoke<number>('poner_brillo', { id, valor }) : Promise.resolve(valor);

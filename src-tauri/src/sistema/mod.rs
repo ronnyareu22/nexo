@@ -4,6 +4,7 @@
 //! Mi setup: el mapa de la casa y la oficina (`setup`) y las escenas de un toque (`escenas`).
 //! El ícono de la barra de menús o de la bandeja y sus accesos rápidos (`bandeja`).
 //! Los widgets de brillo de una sola pantalla (`widget_brillo`).
+//! Mac: la pantalla virtual para ver una segunda pantalla en RustDesk (`pantalla_virtual`).
 //! Windows: actualizaciones desde la Mac (`actualizar`), una sola copia abierta (`instancia`), lo de la primera vez
 //! (`primer_inicio`) y el registro de fallos al arrancar (`fallos`).
 
@@ -16,6 +17,7 @@ pub mod drop;
 pub mod escenas;
 pub mod fallos;
 pub mod instancia;
+pub mod pantalla_virtual;
 pub mod permisos;
 pub mod primer_inicio;
 pub mod remoto;

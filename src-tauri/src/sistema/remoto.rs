@@ -8,6 +8,7 @@
 //! - Portapapeles liviano: durante la sesión achica las imágenes grandes antes de que RustDesk las mande, y guarda
 //!   las últimas 12 copias para volver a copiarlas (`portapapeles`).
 //! - Durante la sesión: la Mac no se duerme (caffeinate) y la pantalla de la MacBook baja al mínimo.
+//!   Si se eligió, la pantalla virtual para RustDesk se crea al empezar y se quita al terminar (`pantalla_virtual`).
 //!
 //! En Windows: abre RustDesk conectado a la Mac y, con la sesión al frente, manda a la Mac los atajos que
 //! Windows se guarda (Win+Tab, Win+D, Ctrl+Win+←/→, Win+Shift+S, Alt+Tab, Win+E): ver `remoto_windows`.
@@ -616,6 +617,7 @@ mod mac {
             } else {
                 restaurar_brillo(app);
             }
+            crate::sistema::pantalla_virtual::al_cambiar_sesion(app, nueva.activa);
         }
         let _ = app.emit("remoto-cambio", &nueva);
     }

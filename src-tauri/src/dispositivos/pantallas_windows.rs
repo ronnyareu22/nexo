@@ -751,6 +751,7 @@ impl Estado {
                     brillo: c.map(Control::porcentaje),
                     controlable: c.is_some(),
                     principal: m.principal,
+                    es_virtual: false,
                 };
                 (m, p)
             })

@@ -217,8 +217,10 @@ pub fn leer_aparatos(app: &AppHandle) -> Aparatos {
         equipo: drop::nombre_propio(),
         plataforma: drop::PLATAFORMA.into(),
         dispositivos: lista.iter().map(aparato).collect(),
+        // La pantalla virtual de RustDesk no va en el mapa: no está en el escritorio.
         pantallas: pantallas
             .into_iter()
+            .filter(|p| !p.es_virtual)
             .map(|p| PantallaSetup { id: p.id, nombre: p.nombre, interna: p.interna, brillo: p.brillo })
             .collect(),
     }

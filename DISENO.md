@@ -64,6 +64,7 @@ src-tauri/src/
 | Brillo mínimo por monitor externo (10 % de fábrica, 0–40 %): el 0 % de Nexo nunca baja de ahí, así no parpadea | ⚠️ ddc-macos, sin probar con el aparato | ⚠️ dxva2, compilado con cargo-xwin, sin probar con el Steren |
 | Ajustes del monitor por DDC/CI (contraste, modo de color, luz cálida, rojo/verde/azul, nitidez, modo de imagen, entrada, volumen, silencio, valores de fábrica), solo lo que el monitor dice que tiene | ⚠️ capacidades con el crate `ddc`, sin probar | ⚠️ `CapabilitiesRequestAndCapabilitiesReply`, sin probar |
 | Widget de brillo de una sola pantalla (`brillo-<id>`), desde la tarjeta de la pantalla o el submenú Brillo del ícono | ⚠️ escrito, sin probar | ⚠️ escrito y compilado con cargo-xwin, sin probar |
+| Pantalla virtual para RustDesk (segunda pantalla de la Mac, en otra ventana de RustDesk): Remoto, menú del ícono y Pantallas | ⚠️ CGVirtualDisplay comprobado con un script en macOS 26.6 (crear, cambiar de resolución, quitar); en la app, sin probar | ❌ no existe (solo la guía de RustDesk en Remoto) |
 
 **Medidas actuales:** la app pesa 4,5 MB y el proceso principal usa unos 27 MB. Con el panel abierto se suman unos 70 MB del motor web, que se liberan al cerrar el panel.
 
@@ -218,6 +219,7 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - **Brillo mínimo** (pedido del dueño el 4 nov: "si pongo en 0, queda parpadeando"): cada monitor externo tiene un mínimo (10 % de fábrica, de 0 a 40 %, en `ajustes.json › minimosBrillo`). El 0 % de Nexo es ese mínimo y el 100 % el máximo. Se aplica en un solo lugar, el hilo de pantallas (`dispositivos/pantallas.rs`), así vale para el panel, las teclas, el menú, las escenas y los widgets. Si al conectarlo el monitor estaba por debajo del mínimo, sube al mínimo.
    - **Ajustes del monitor** (sección que se despliega en la tarjeta de cada monitor externo, `AjustesMonitor.svelte`; sin pestañas): el brillo mínimo y una rejilla con lo que el monitor dice que tiene en su lista de capacidades DDC/CI (`dispositivos/vcp.rs`, leída una vez por monitor): contraste (0x12), modo de color (0x14) con "Luz cálida" (el preset más cálido y vuelta al de antes), rojo, verde y azul (0x16/18/1A) en un modo "Usuario", nitidez (0x87), modo de imagen (0xDC), entrada (0x60, con confirmación), volumen (0x62), silencio (0x8D) y "Restaurar valores de fábrica" (0x04, con confirmación). Los valores se leen al abrir la sección, nunca en un bucle. Si el monitor no da su lista, solo se muestran los controles continuos que respondieron. Fuera de la app: `?seccion=pantallas&monitor=abierto`.
    - **Widget de brillo en esta pantalla**: interruptor por pantalla (ver la sección 10).
+   - **Pantalla virtual** (Mac, 4 nov): sale con la ilustración del monitor, el chip "Virtual", sus resoluciones fijas (se cambian al instante, sin confirmar) y "Quitar". Sin brillo, sin "Hacer principal" y fuera de DDC/CI (`controlable` falso; el hilo de pantallas no la busca). No aparece en el mapa de Mi setup ni en los widgets nativos.
    - El atajo de teclas de brillo.
 5. **Remoto** (hecho el 3 nov; el dueño controla la Mac desde la PC del trabajo con RustDesk por Tailscale)
    - **Estado:** quién está conectado, si va directo por Tailscale o por relé, y el estado de Tailscale y RustDesk en fichas. A la izquierda, la ilustración del PC y la Mac con Tailscale al medio (`remoto-conectado`, `remoto` o `remoto-sin`, del mismo generador).
@@ -231,6 +233,12 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - **Portapapeles liviano:** durante la sesión, las imágenes grandes se reducen a 1600 px antes de que RustDesk las mande. Historial de 12 copias, sin contraseñas.
    - **Durante la sesión:** la Mac no se duerme (`caffeinate -s -w`) y el brillo baja al mínimo; al terminar, todo vuelve como estaba.
    - **Permiso nuevo y obligatorio:** Grabación de pantalla.
+   - **Pantalla virtual para RustDesk** (Mac, 4 nov; `sistema/pantalla_virtual.rs`): una segunda pantalla para ver la Mac en dos ventanas de RustDesk, una en cada monitor de la oficina.
+     - Se crea con las clases privadas `CGVirtualDisplay…` de CoreGraphics (como DeskPad), en el hilo principal. Vive mientras Nexo guarda el objeto; si Nexo se cierra, macOS la quita.
+     - Resoluciones fijas a 60 Hz y sin HiDPI: 1920 × 1080 (de fábrica), 1600 × 900, 2560 × 1440 y 1440 × 900. Se cambia en vivo con `applySettings:`; si no se acepta, se crea de nuevo.
+     - `ajustes.json › pantallaVirtual` (`activa`, `ancho`, `alto`, `crearAlEmpezar`, `quitarAlTerminar`): vuelve al abrir Nexo si estaba activa; las dos opciones de la sesión vienen apagadas.
+     - En Remoto, su tarjeta con el interruptor, la resolución, las dos opciones y "Cómo verla en la oficina" (los pasos de RustDesk; en Windows, solo los pasos). Casilla "Pantalla virtual para RustDesk" en el menú del ícono.
+     - Fuera de la app viene encendida; `?virtual=no` la muestra apagada y `?virtual=nodisponible` sin poder crearla.
 6. **XDrop** (antes Nexo Drop; escrito el 3 nov y renombrado el mismo día): pasar archivos, carpetas, textos, enlaces y capturas entre la Mac y el PC por Tailscale. El id de la sección sigue siendo `drop`.
    - **Receptor** (`sistema/drop/servidor.rs`): escucha solo en la dirección de Tailscale del equipo, puerto 47821, y solo atiende a equipos del mismo dueño en Tailscale (y al mismo equipo, para probar). Lo recibido queda en Descargas › XDrop (`drop::CARPETA`, igual en los dos sistemas); el texto va al portapapeles y los enlaces se abren en el navegador. Las notificaciones llevan el título "XDrop".
    - **Envío** (`sistema/drop/envio.rs`): un lote a la vez, con avance, velocidad, tiempo restante y Cancelar. Se suelta sobre cualquier parte de la ventana (o sobre el widget) y lleva a XDrop.
@@ -263,6 +271,7 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
 | Resolución y frecuencia | ✅ CGDisplayMode | ✅ ChangeDisplaySettingsEx | Menús con los modos reales |
 | Pantalla principal y posición | ✅ CGConfigureDisplayOrigin | ✅ | Distribución arrastrable |
 | Rotación | ⚠️ privada | ✅ | Solo donde funcione |
+| Pantalla virtual (segunda pantalla para RustDesk) | ⚠️ privada (`CGVirtualDisplay`), comprobada en macOS 26.6 | ❌ | Mac: interruptor y resoluciones fijas · Windows: solo cómo verla en RustDesk |
 | Atajos del sistema (Mission Control, escritorios, capturas) | ✅ `com.apple.symbolichotkeys` y aplicar sin cerrar sesión | ❌ son fijos | Mac: editables · Windows: de referencia |
 | Reasignar teclas | ✅ `hidutil` (UserKeyMapping, por teclado) | ⚠️ con Nexo abierto (gancho de teclado) o permanente con permiso de administrador | Explicar el alcance en pantalla |
 | Velocidad del cursor y del desplazamiento | ⚠️ preferencias del sistema; pueden pedir volver a abrir apps | ✅ SystemParametersInfo | Solo si se aplica de verdad |
@@ -367,7 +376,7 @@ El dueño los quiere **en los dos sistemas**. Hay tres niveles, que se hacen en 
 | 1 | Tokens de la sección 4, letra, componentes de la sección 5 y Nexo Bot con sus 8 expresiones | ✅ Hecha (3 nov): paleta turquesa, superficies sólidas, barra lateral, menú y tooltip propios, diálogo, Nexo Bot en SVG (`diseno/mascota/generar.mjs`) |
 | 2 | Barra lateral, Inicio y Dispositivos (lista + panel de detalle) | ✅ Hecha (3 nov) |
 | 3 | Detalle de audífonos y página Audio (salida y entrada del sistema, alias, olvidar) | ✅ Hecha · falta probar Olvidar con un aparato real |
-| 4 | Pantallas: resolución, frecuencia, principal y distribución | Brillo, resolución, frecuencia y principal hechos · brillo mínimo y ajustes del monitor por DDC/CI escritos (4 nov) · falta la distribución arrastrable y probar con el Steren |
+| 4 | Pantallas: resolución, frecuencia, principal y distribución | Brillo, resolución, frecuencia y principal hechos · brillo mínimo y ajustes del monitor por DDC/CI escritos (4 nov) · pantalla virtual para RustDesk escrita (4 nov), sin probar en la app · falta la distribución arrastrable y probar con el Steren |
 | 5 | Widgets: panel rápido, WidgetKit (Mac), proveedor de widgets (Windows), `estado.json` | Widget de escritorio propio hecho (Mac y Windows) · widget de brillo por pantalla escrito (4 nov), sin probar · faltan los nativos (Xcode; MSIX en Windows) |
 | 6 | Automatizaciones y Ajustes completos; versión Windows de lo anterior | Mac hecho · Windows escrito el 3 nov (Bluetooth y sonido con WASAPI y KS, monitores por DDC/CI, WMI, modos, arranque) y compilado desde la Mac con cargo-xwin · falta probarlo en el PC del trabajo |
 | 7 | Accesibilidad, optimización, pruebas y firma estable | Por empezar |
