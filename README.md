@@ -80,10 +80,14 @@ pnpm tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles n
 
 El instalador queda en `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`. Para revisar sin compilar: `cargo xwin check --target x86_64-pc-windows-msvc`.
 
+## Instalar en la Mac (firma estable)
+
+`./scripts/instalar-mac.sh` compila los widgets y la app, firma todo con el certificado propio **"Nexo Local (Ronny)"** (en el llavero de esta Mac; copia del certificado público en `~/.config/nexo-firma/cert.pem`) e instala en `~/Applications`. Con la misma firma en cada versión, macOS **no vuelve a pedir los permisos** al actualizar. Si el certificado no está, firma localmente (y entonces sí se pierden).
+
 ## Permisos en la Mac
 
 - **Bluetooth:** se pide al conectar un aparato por primera vez.
-- **Accesibilidad:** solo si activas "Teclas de brillo en el monitor bajo el mouse". Como la app se firma localmente, cada vez que se vuelve a compilar macOS la toma como nueva y hay que activar el permiso otra vez en Ajustes del Sistema › Privacidad y seguridad › Accesibilidad.
+- **Accesibilidad:** solo si activas "Teclas de brillo en el monitor bajo el mouse". Con la firma estable (`scripts/instalar-mac.sh`) el permiso se conserva entre versiones.
 
 ## Siguientes pasos
 
