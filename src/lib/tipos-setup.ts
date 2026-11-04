@@ -1,5 +1,6 @@
 // Tipos de Mi setup (src-tauri/src/sistema/setup.rs y escenas.rs), con `serde(rename_all = "camelCase")`.
 import type { Tipo } from './tipos';
+import type { Destino, Objetivo } from './tipos-hogar';
 
 export type PlataformaSetup = 'mac' | 'windows' | 'otro';
 
@@ -61,8 +62,8 @@ export interface EstadoSetup {
 
 export type LugarId = 'casa' | 'oficina';
 
-/** "equipo" es la computadora misma: la MacBook o la torre del PC. */
-export type TipoItem = 'aparato' | 'pantalla' | 'equipo' | 'deco';
+/** "equipo" es la computadora misma: la MacBook o la torre del PC; "hogar", un aparato de la casa (una luz). */
+export type TipoItem = 'aparato' | 'pantalla' | 'equipo' | 'deco' | 'hogar';
 
 /** Las decoraciones: fotos en static/setup/<nombre>.png. Son solo visuales. */
 export type Deco =
@@ -117,7 +118,8 @@ export type Accion =
   | { tipo: 'volumenMicrofono'; valor: number }
   | { tipo: 'modoTrabajo'; activo: boolean }
   | { tipo: 'abrirApp'; nombre: string }
-  | { tipo: 'luces' }
+  /** Aparatos de la casa (luces, enchufes, la tele…): a quién y cómo deben quedar. `nombre` es para mostrarlo. */
+  | { tipo: 'luces'; destino?: Destino | null; objetivo?: Objetivo | null; nombre?: string | null }
   | { tipo: 'desconocida' };
 
 export type TipoAccion = Accion['tipo'];
@@ -142,7 +144,7 @@ export interface EstadoEscenas {
   ultima: UltimaEscena | null;
 }
 
-/** Cómo salió un paso. `omitida`: no se ejecutó a propósito (las luces). */
+/** Cómo salió un paso. `omitida`: no se ejecutó a propósito (un paso de luces sin elegir, o de otro sistema). */
 export interface ResultadoAccion {
   accion: Accion;
   ok: boolean;

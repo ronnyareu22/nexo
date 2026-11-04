@@ -32,8 +32,9 @@ const MAX_TEXTO: usize = 200;
 const TIPOS: &[&str] =
     &["audifonos", "diadema", "telefono", "teclado", "mouse", "parlante", "monitor", "luz", "portatil", "otro"];
 
-/// Lo que se puede poner en el mapa. "equipo" es la computadora misma (la MacBook o la torre del PC).
-const TIPOS_ITEM: &[&str] = &["aparato", "pantalla", "equipo", "deco"];
+/// Lo que se puede poner en el mapa. "equipo" es la computadora misma (la MacBook o la torre del PC); "hogar", un
+/// aparato de la casa (una luz, el enchufe…), por su id de `hogar`.
+const TIPOS_ITEM: &[&str] = &["aparato", "pantalla", "equipo", "deco", "hogar"];
 
 /// Las decoraciones: fotos en static/setup/<nombre>.png.
 pub const DECORACIONES: &[&str] = &[
@@ -145,7 +146,7 @@ pub struct Lugar {
 #[serde(rename_all = "camelCase")]
 pub struct Item {
     pub id: String,
-    /// "aparato", "pantalla", "equipo" o "deco".
+    /// "aparato", "pantalla", "equipo", "deco" u "hogar".
     pub tipo: String,
     /// La dirección del aparato, el nombre de la pantalla, el nombre del equipo o la clase de decoración.
     #[serde(rename = "ref")]

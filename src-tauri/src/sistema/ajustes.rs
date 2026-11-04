@@ -46,6 +46,8 @@ pub struct Ajustes {
     pub pantalla_virtual: super::pantalla_virtual::AjustesPantallaVirtual,
     /// El trabajo remoto: Automático, Siempre o Nunca, y el último otro equipo encontrado (ver `equipos`).
     pub equipos: super::equipos::AjustesEquipos,
+    /// La casa: cuentas (sin secretos), lo agregado de la red, nombres, habitaciones y grupos (ver `hogar`).
+    pub hogar: super::hogar::AjustesHogar,
 }
 
 /// Un widget de brillo encendido: su pantalla y dónde lo dejó la persona (en puntos en Mac y en píxeles reales
@@ -76,6 +78,7 @@ impl Default for Ajustes {
             widgets_brillo: Vec::new(),
             pantalla_virtual: super::pantalla_virtual::AjustesPantallaVirtual::default(),
             equipos: super::equipos::AjustesEquipos::default(),
+            hogar: super::hogar::AjustesHogar::default(),
         }
     }
 }

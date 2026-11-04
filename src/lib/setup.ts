@@ -5,6 +5,8 @@
 // más grande y más abajo. Lo de la pared (cuadro, repisa, tira de luz) va donde se suelte. Todo en % de la escena.
 import type { Dispositivo, Tipo } from './tipos';
 import { fotoDePantalla, modeloDe } from './catalogo';
+import { activo, colorDeLuz, estadoEnPalabras, resumenObjetivo, tipoDe } from './hogar';
+import type { Aparato as AparatoCasa, ClaseAparato, EstadoCasa, FormaLuz } from './tipos-hogar';
 import type {
   Accion,
   Aparato,
@@ -137,6 +139,44 @@ function formaDe(foto: string | null, tipo: Tipo | 'torre'): Forma {
   };
 }
 
+/** Dónde está cada aparato de la casa dentro de su dibujo (IlustracionAparato, 200×200, con `enMapa`) y su tamaño.
+ *  La tira, la barra del monitor, el enchufe y lo de puertas y ventanas van en la pared; lo demás, en la mesa. */
+export function formaDeHogar(a: { clase: ClaseAparato; forma: FormaLuz | null }): Forma {
+  const f = (caja: readonly [number, number, number, number], tam: number, pared = false): Forma => ({
+    foto: null,
+    ilustracion: null,
+    caja,
+    tam,
+    pared,
+  });
+  if (a.clase === 'luz') {
+    switch (a.forma) {
+      case 'tira':
+        return f([0.08, 0.465, 0.92, 0.535], 30, true);
+      case 'barra':
+        return f([0.15, 0.28, 0.85, 0.43], 20, true);
+      case 'lampara':
+        return f([0.27, 0.17, 0.73, 0.94], 15);
+      default:
+        return f([0.29, 0.19, 0.71, 0.88], 8);
+    }
+  }
+  switch (a.clase) {
+    case 'enchufe':
+      return f([0.26, 0.22, 0.74, 0.84], 6, true);
+    case 'tv':
+      return f([0.07, 0.2, 0.93, 0.885], 30);
+    case 'clima':
+      return f([0.11, 0.28, 0.89, 0.54], 20, true);
+    case 'cortina':
+    case 'cerradura':
+    case 'sensorPuerta':
+      return f([0.13, 0.13, 0.87, 0.88], 12, true);
+    default:
+      return f([0.28, 0.28, 0.72, 0.72], 8);
+  }
+}
+
 /** El borde de arriba que se ve (lo aplastado queda más bajo). */
 export const arribaVisible = (f: Forma) => f.caja[3] - (f.caja[3] - f.caja[1]) * (f.aplastar ?? 1);
 
@@ -194,6 +234,16 @@ export interface Pieza {
   marca: string | null;
   /** El id real del aparato de este equipo (para abrir su página). */
   aparatoId: string | null;
+  /** Un aparato de la casa (una luz): cómo dibujarlo y con qué color brilla. */
+  hogar: {
+    id: string;
+    clase: ClaseAparato;
+    forma: FormaLuz | null;
+    encendido: boolean;
+    color: string | null;
+    abierto: boolean | null;
+    controlable: boolean;
+  } | null;
 }
 
 const NOMBRE_TIPO: Record<Tipo, string> = {
@@ -232,8 +282,47 @@ function fuenteDe(item: ItemMapa, fuentes: Map<string, Fuente>, local: Fuente | 
 
 /** Lo que se dibuja de cada cosa del mapa. null si ya no existe (un aparato olvidado) o no hay datos.
  *  `local` va solo en el lugar de este equipo: ahí, lo que no se encuentra por nombre se busca en este equipo. */
-export function resolver(item: ItemMapa, fuentes: Map<string, Fuente>, local: Fuente | null): Pieza | null {
-  const base = { item, bateria: null, local: false, viejo: false, visto: null, tipoAparato: null, marca: null, aparatoId: null };
+export function resolver(
+  item: ItemMapa,
+  fuentes: Map<string, Fuente>,
+  local: Fuente | null,
+  casa: EstadoCasa | null = null,
+): Pieza | null {
+  const base = {
+    item,
+    bateria: null,
+    local: false,
+    viejo: false,
+    visto: null,
+    tipoAparato: null,
+    marca: null,
+    aparatoId: null,
+    hogar: null,
+  };
+  if (item.tipo === 'hogar') {
+    const a = casa?.aparatos.find((x) => x.id === item.ref);
+    if (!a) return null;
+    const lugar = casa?.habitaciones.find((h) => h.id === a.habitacion)?.nombre;
+    return {
+      ...base,
+      forma: formaDeHogar(a),
+      nombre: a.nombre,
+      detalle: lugar ? `${tipoDe(a)} · ${lugar}` : tipoDe(a),
+      estado: activo(a) ? 'encendido' : 'apagado',
+      estadoTexto: estadoEnPalabras(a) || 'Detectado',
+      local: true,
+      viejo: !a.enLinea,
+      hogar: {
+        id: a.id,
+        clase: a.clase,
+        forma: a.forma,
+        encendido: a.enLinea && a.estado.encendido === true,
+        color: a.clase === 'luz' ? colorDeLuz(a) : null,
+        abierto: a.estado.abierto,
+        controlable: a.controlable && a.capacidades.encender,
+      },
+    };
+  }
   if (item.tipo === 'deco') {
     if (!esDeco(item.ref)) return null;
     const d = DECOS[item.ref];
@@ -449,8 +538,22 @@ function xEnSoporte(x: number, capa: number) {
 
 const elegir = (lista: Aparato[], patron: RegExp) => lista.find((d) => patron.test(d.nombre)) ?? lista[0];
 
-/** El mapa de la primera vez, con los aparatos que de verdad hay (y las decoraciones). */
-export function porDefecto(lugar: LugarId, equipo: Aparatos | null): LugarMapa {
+/** Dónde va cada luz del escritorio la primera vez: la tira en la pared, la barra sobre el monitor. */
+function ponerLuces(items: ItemMapa[], luces: AparatoCasa[], hayMonitor: boolean) {
+  let focos = 0;
+  for (const a of luces) {
+    const id = (donde: { x: number; capa?: number; y?: number | null }) => items.push(nuevoItem('hogar', a.id, null, donde));
+    if (a.clase === 'enchufe') id({ x: 6, y: 50, capa: 0 });
+    else if (a.forma === 'tira') id({ x: 70, y: 22, capa: 0 });
+    else if (a.forma === 'barra') id(hayMonitor ? { x: 50, y: 28, capa: 0 } : { x: 48, y: 52, capa: 0 });
+    else if (a.forma === 'lampara') id({ x: 20, capa: 0 });
+    else if (a.clase === 'luz') id({ x: 36 + 26 * focos++, capa: 0 });
+  }
+}
+
+/** El mapa de la primera vez, con los aparatos que de verdad hay (y las decoraciones). Con `luces`, las del
+ *  escritorio (van en el lugar de este equipo). */
+export function porDefecto(lugar: LugarId, equipo: Aparatos | null, luces: AparatoCasa[] = []): LugarMapa {
   const items: ItemMapa[] = [];
   const nombre = equipo?.equipo ?? null;
   const de = (tipo: Tipo[]) => equipo?.dispositivos.filter((d) => tipo.includes(d.tipo)) ?? [];
@@ -473,6 +576,7 @@ export function porDefecto(lugar: LugarId, equipo: Aparatos | null): LugarMapa {
     const telefono = de(['telefono'])[0];
     if (telefono && nombre) items.push(nuevoItem('aparato', telefono.id, nombre, { x: 30, capa: 2 }));
     items.push(deco('planta-pequena', 14, 2), deco('taza', 91, 2));
+    ponerLuces(items, luces, !!externas[0]);
   } else {
     items.push(deco('tira-luz', 80, 0, 34), deco('lampara', 12, 0), deco('base-monitor', 50, 0));
     if (equipo && nombre) {
@@ -487,6 +591,7 @@ export function porDefecto(lugar: LugarId, equipo: Aparatos | null): LugarMapa {
     const mouse = elegir(de(['mouse']), /mx\s*master/i);
     if (mouse && nombre) items.push(nuevoItem('aparato', mouse.id, nombre, { x: 70, capa: 2 }));
     items.push(deco('planta-pequena', 88, 2));
+    ponerLuces(items, luces, !!externas[0]);
   }
   // Ids fijos para las decoraciones: el mapa de la primera vez se rehace con cada lectura y no debe parpadear.
   return { items: items.map((it, i) => (it.tipo === 'deco' ? { ...it, id: `deco-${lugar}-${i}` } : it)) };
@@ -548,7 +653,12 @@ export function accionNueva(tipo: Exclude<TipoAccion, 'desconocida'>, aparato?: 
     case 'abrirApp':
       return { tipo, nombre: '' };
     case 'luces':
-      return { tipo };
+      return {
+        tipo,
+        destino: { tipo: 'todos', clase: 'luz' },
+        objetivo: { encendido: true, brillo: 80, temperatura: null, color: null },
+        nombre: 'todas las luces',
+      };
   }
 }
 
@@ -588,7 +698,7 @@ function corto(a: Accion, nombrePor: NombrePor): string {
     case 'abrirApp':
       return `Abre ${a.nombre}`;
     case 'luces':
-      return 'Luces, cuando las conectes';
+      return lucesCorto(a);
     case 'desconocida':
       return 'Un paso de una versión más nueva';
   }
@@ -634,7 +744,7 @@ export function haciendo(a: Accion, nombrePor: NombrePor): string {
     case 'abrirApp':
       return `Abriendo ${a.nombre}`;
     case 'luces':
-      return 'Luces';
+      return `Ajustando ${a.nombre || 'las luces'}`;
     case 'desconocida':
       return 'Un paso nuevo';
   }
@@ -662,8 +772,19 @@ export function paso(a: Accion, nombrePor: NombrePor): string {
     case 'abrirApp':
       return `Abrir ${a.nombre}`;
     case 'luces':
-      return 'Luces';
+      if (!a.objetivo || !a.destino) return 'Luces sin elegir';
+      return `${a.objetivo.encendido ? 'Encender' : 'Apagar'} ${a.nombre || 'las luces'}`;
     case 'desconocida':
       return 'Un paso nuevo';
   }
+}
+
+/** El paso de luces en corto, para el resumen ("Todas las luces al 85 %", "Apaga el escritorio"). */
+function lucesCorto(a: Extract<Accion, { tipo: 'luces' }>): string {
+  if (!a.destino || !a.objetivo) return 'Luces sin elegir';
+  const quien = a.nombre || 'las luces';
+  if (!a.objetivo.encendido) return `Apaga ${quien}`;
+  const como = resumenObjetivo(a.objetivo).replace(/^Encender ?/, '');
+  const Quien = quien.charAt(0).toUpperCase() + quien.slice(1);
+  return como ? `${Quien} ${como}` : `Enciende ${quien}`;
 }

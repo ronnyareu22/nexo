@@ -4,7 +4,10 @@
   y su control simple (un deslizador, el nombre de la app, encender o apagar).
   Abajo, "Agregar dispositivo": todos los aparatos que Nexo conoce (los de este equipo, sus pantallas y salidas de
   sonido, y los del otro equipo), y al elegir uno, lo que se puede hacer con él. Lo del otro equipo se ve, pero no
-  se elige: sus pasos solo corren en ese equipo. Luego, los pasos sin aparato (apps, modo trabajo, luces).
+  se elige: sus pasos solo corren en ese equipo. También lo de tu casa (luces, enchufes, la tele): encender o apagar.
+  Luego, los pasos sin aparato (apps, modo trabajo, luces de la casa).
+  Un paso de luces elige a quién (todas, un grupo, una habitación o un aparato) y cómo debe quedar: encendido o
+  apagado, el brillo y, si se quiere, blanco (de cálido a frío) o un color. Lo que una luz no sabe hacer se deja afuera.
   Solo ofrece lo que Nexo controla en este equipo (el modo trabajo, solo en la Mac).
   Superficie sólida, sin desplazamiento de entrada: solo un fundido. Esc o un clic afuera cierran.
 -->
@@ -15,6 +18,10 @@
   import { pruebaSetup } from '$lib/api-setup';
   import type { DispositivoAudio, Tipo } from '$lib/tipos';
   import type { Accion, Aparato, EquipoRemoto, Escena, PantallaSetup } from '$lib/tipos-setup';
+  import type { Aparato as AparatoCasa, Destino, EstadoCasa, Objetivo } from '$lib/tipos-hogar';
+  import { MUESTRAS, PISTA_BLANCO, cssDeHsv, hayCuentas, nombreDestino, tipoDe } from '$lib/hogar';
+  import IlustracionAparato from './IlustracionAparato.svelte';
+  import MenuDesplegable from './MenuDesplegable.svelte';
   import {
     ICONOS_ESCENA,
     PASOS,
@@ -45,6 +52,7 @@
     equipo = '',
     remotos = [],
     mac,
+    casa = null,
     onguardar,
     onborrar,
     oncerrar,
@@ -62,6 +70,8 @@
     remotos?: EquipoRemoto[];
     /** El modo trabajo solo existe en la Mac. */
     mac: boolean;
+    /** La casa: luces, enchufes y la tele para los pasos de luces. */
+    casa?: EstadoCasa | null;
     /** Devuelve el motivo si no se pudo guardar. */
     onguardar: (e: Escena) => Promise<string | null>;
     onborrar: (id: string) => Promise<string | null>;
@@ -162,8 +172,8 @@
   const esDeSonido = (t: Tipo) => t === 'audifonos' || t === 'diadema' || t === 'parlante';
   const normal = (t: string) => t.toUpperCase().replaceAll('-', ':');
 
-  /** Algo que se puede elegir: un aparato Bluetooth, una salida de sonido del sistema o una pantalla. */
-  type Clase = 'sonido' | 'bluetooth' | 'pantalla' | 'salida';
+  /** Algo que se puede elegir: un aparato Bluetooth, una salida de sonido del sistema, una pantalla o algo de la casa. */
+  type Clase = 'sonido' | 'bluetooth' | 'pantalla' | 'salida' | 'casa';
   interface Elegible {
     clave: string;
     /** La dirección Bluetooth, el identificador de la salida o el nombre de la pantalla. */
@@ -176,6 +186,8 @@
     equipo: string;
     /** De este equipo: solo esos se pueden elegir. */
     local: boolean;
+    /** Algo de la casa (para su dibujo). */
+    hogar?: AparatoCasa;
   }
 
   const deAparato = (a: Aparato, eq: string, local: boolean): Elegible => ({
@@ -214,7 +226,7 @@
     local: true,
   });
 
-  const ORDEN: Record<Clase, number> = { sonido: 0, bluetooth: 1, pantalla: 2, salida: 3 };
+  const ORDEN: Record<Clase, number> = { sonido: 0, bluetooth: 1, pantalla: 2, salida: 3, casa: 4 };
   const ordenar = (l: Elegible[]) => l.sort((x, y) => ORDEN[x.clase] - ORDEN[y.clase]);
 
   /** Por equipo: primero este, luego los otros (que se ven, pero no se eligen). */
@@ -238,10 +250,25 @@
       ]);
       if (items.length) lista.push({ equipo: r.nombre, local: false, aparatos: items });
     }
+    // Lo de la casa: se maneja desde cualquier equipo (por la nube, Home Assistant o la red).
+    const deCasa: Elegible[] = (casa?.aparatos ?? [])
+      .filter((a) => !a.oculto && a.controlable && a.capacidades.encender)
+      .map((a) => ({
+        clave: `casa|${a.id}`,
+        id: a.id,
+        nombre: a.nombre,
+        clase: 'casa' as const,
+        tipo: 'luz' as const,
+        foto: null,
+        equipo: 'tu casa',
+        local: true,
+        hogar: a,
+      }));
+    if (deCasa.length) lista.push({ equipo: 'Tu casa', local: true, aparatos: deCasa });
     return lista;
   });
 
-  type Hacer = 'conectar' | 'desconectar' | 'salida' | 'volumen' | 'brillo';
+  type Hacer = 'conectar' | 'desconectar' | 'salida' | 'volumen' | 'brillo' | 'encender' | 'apagar';
   /** Lo que se puede hacer con cada clase de aparato, en el orden en que se suele armar. */
   const QUE_HACER: Record<Clase, { tipo: Hacer; nombre: string; icono: Nombre }[]> = {
     sonido: [
@@ -259,6 +286,10 @@
       { tipo: 'salida', nombre: 'Usar para el sonido', icono: 'audio' },
       { tipo: 'volumen', nombre: 'Volumen', icono: 'volumen' },
     ],
+    casa: [
+      { tipo: 'encender', nombre: 'Encender', icono: 'encendido' },
+      { tipo: 'apagar', nombre: 'Apagar', icono: 'desconectar' },
+    ],
   };
 
   let eligiendo = $state(false);
@@ -275,11 +306,27 @@
   function yaEsta(e: Elegible, tipo: Hacer): boolean {
     if (tipo === 'volumen') return volumenAgregado;
     if (tipo === 'brillo') return acciones.some((a) => pantallaDe(a) === e.nombre);
+    if (tipo === 'encender' || tipo === 'apagar')
+      return acciones.some(
+        (a) =>
+          a.tipo === 'luces' &&
+          a.destino?.tipo === 'aparato' &&
+          a.destino.id === e.id &&
+          (a.objetivo?.encendido ?? true) === (tipo === 'encender'),
+      );
     return acciones.some((a) => 'dispositivo' in a && a.tipo === tipo && normal(a.dispositivo) === normal(e.id));
   }
 
   function agregarCon(e: Elegible, tipo: Hacer) {
-    if (tipo === 'brillo') acciones.push({ tipo, pantalla: brilloDe(e.nombre), valor: 70 });
+    if (tipo === 'encender' || tipo === 'apagar') {
+      const brillo = tipo === 'encender' && e.hogar?.capacidades.brillo ? 80 : null;
+      acciones.push({
+        tipo: 'luces',
+        destino: { tipo: 'aparato', id: e.id },
+        objetivo: { encendido: tipo === 'encender', brillo, temperatura: null, color: null },
+        nombre: e.nombre,
+      });
+    } else if (tipo === 'brillo') acciones.push({ tipo, pantalla: brilloDe(e.nombre), valor: 70 });
     else if (tipo === 'volumen') {
       acciones.push({ tipo, valor: 50 });
       volumenAgregado = true;
@@ -295,7 +342,7 @@
     volumenMicrofono: 'Volumen del micrófono',
     abrirApp: 'Abrir una app',
     modoTrabajo: 'Modo trabajo',
-    luces: 'Luces (cuando las tengas)',
+    luces: 'Luces de la casa',
   };
   const otrosPasos = $derived(PASOS.filter((p) => p.tipo in NOMBRE_OTRO && (mac || !p.soloMac)));
 
@@ -322,16 +369,36 @@
   };
 
   /** Cómo se ve un paso en la lista: qué hace en palabras, su foto (o su ícono) y si su aparato está aquí. */
-  function verPaso(a: Accion): { titulo: string; foto: string | null; tipo: Tipo | null; icono: Nombre; aqui: boolean } {
+  /** A quién va un paso de luces, para la frase ("todas las luces", "Tira del escritorio"). */
+  function quien(d: Destino | null | undefined, guardado?: string | null): string {
+    const n = nombreDestino(d, casa, guardado);
+    return d?.tipo === 'todos' || d?.tipo === 'habitacion' ? n.charAt(0).toLowerCase() + n.slice(1) : n;
+  }
+
+  function verPaso(a: Accion): {
+    titulo: string;
+    foto: string | null;
+    tipo: Tipo | null;
+    icono: Nombre;
+    aqui: boolean;
+    hogar?: AparatoCasa;
+  } {
     const icono = (pasoDe(a.tipo)?.icono ?? 'rayo') as Nombre;
+    if (a.tipo === 'luces') {
+      const titulo = !a.destino
+        ? 'Luces: elige cuáles'
+        : `${a.objetivo?.encendido === false ? 'Apagar' : 'Encender'} ${quien(a.destino, a.nombre)}`;
+      const d = a.destino;
+      const hogar = d?.tipo === 'aparato' ? casa?.aparatos.find((x) => x.id === d.id) : undefined;
+      const aqui = !(d?.tipo === 'aparato' && casa && !hogar);
+      return { titulo, foto: null, tipo: null, icono, aqui, hogar };
+    }
     const titulo =
       a.tipo === 'abrirApp'
         ? a.nombre.trim()
           ? `Abrir ${a.nombre.trim()}`
           : 'Abrir una app'
-        : a.tipo === 'luces'
-          ? 'Luces, cuando las tengas'
-          : a.tipo === 'desconocida'
+        : a.tipo === 'desconocida'
             ? 'Un paso de una versión más nueva'
             : pasoEnPalabras(a, nombrePor);
     if ('dispositivo' in a) {
@@ -357,6 +424,8 @@
     if (acciones.some((a) => 'dispositivo' in a && !a.dispositivo.trim())) return 'Elige el aparato de cada paso.';
     if (acciones.some((a) => a.tipo === 'abrirApp' && !a.nombre.trim()))
       return 'Escribe el nombre de la app que quieres abrir.';
+    if (acciones.some((a) => a.tipo === 'luces' && (!a.destino || !a.objetivo)))
+      return 'Elige qué luces y cómo deben quedar en cada paso de luces.';
     return null;
   }
 
@@ -372,6 +441,75 @@
       acciones: $state.snapshot(acciones),
     });
     guardando = false;
+  }
+
+  // --- Paso de luces ---
+  type PasoLuces = Extract<Accion, { tipo: 'luces' }>;
+  const OBJETIVO: Objetivo = { encendido: true, brillo: 80, temperatura: null, color: null };
+
+  /** A quién puede ir: todas las luces, un grupo, las luces de una habitación o un aparato. */
+  const opcionesDestino = $derived.by(() => {
+    const c = casa;
+    const lista: { valor: string; nombre: string; detalle?: string }[] = [{ valor: 'todos:luz', nombre: 'Todas las luces' }];
+    if (!c) return lista;
+    for (const g of c.grupos) lista.push({ valor: `grupo:${g.id}`, nombre: g.nombre, detalle: 'Grupo' });
+    for (const h of c.habitaciones)
+      if (c.aparatos.some((a) => a.habitacion === h.id && a.clase === 'luz' && a.controlable))
+        lista.push({ valor: `habitacion:${h.id}`, nombre: `Luces de ${h.nombre}`, detalle: 'Habitación' });
+    for (const a of c.aparatos)
+      if (!a.oculto && a.controlable && a.capacidades.encender) lista.push({ valor: `aparato:${a.id}`, nombre: a.nombre, detalle: tipoDe(a) });
+    return lista;
+  });
+
+  function claveDestino(d: Destino | null | undefined): string {
+    if (!d) return '';
+    switch (d.tipo) {
+      case 'todos':
+        return `todos:${d.clase ?? ''}`;
+      case 'nombre':
+        return `nombre:${d.texto}`;
+      default:
+        return `${d.tipo}:${d.id}`;
+    }
+  }
+
+  /** Las opciones, más la de este paso si ya no está en la casa (para no perderla de vista). */
+  function opcionesDe(a: PasoLuces) {
+    const k = claveDestino(a.destino);
+    return !k || opcionesDestino.some((o) => o.valor === k)
+      ? opcionesDestino
+      : [...opcionesDestino, { valor: k, nombre: a.nombre || 'Lo que elegiste antes', detalle: 'Ya no está' }];
+  }
+
+  function ponerDestino(a: PasoLuces, valor: string) {
+    const [tipo, ...resto] = valor.split(':');
+    const id = resto.join(':');
+    const destino: Destino =
+      tipo === 'grupo'
+        ? { tipo: 'grupo', id }
+        : tipo === 'habitacion'
+          ? { tipo: 'habitacion', id, clase: 'luz' }
+          : tipo === 'aparato'
+            ? { tipo: 'aparato', id }
+            : { tipo: 'todos', clase: 'luz' };
+    a.destino = destino;
+    a.nombre = quien(destino);
+    a.objetivo ??= { ...OBJETIVO };
+    error = null;
+  }
+
+  function ponerObjetivo(a: PasoLuces, cambio: Partial<Objetivo>) {
+    a.objetivo = { ...(a.objetivo ?? OBJETIVO), ...cambio };
+  }
+
+  type ModoPaso = 'igual' | 'blanco' | 'color';
+  const modoDe = (o: Objetivo | null | undefined): ModoPaso => (o?.color ? 'color' : o?.temperatura !== null && o?.temperatura !== undefined ? 'blanco' : 'igual');
+
+  function ponerModo(a: PasoLuces, modo: string) {
+    const brillo = a.objetivo?.brillo ?? 80;
+    if (modo === 'blanco') ponerObjetivo(a, { temperatura: 50, color: null });
+    else if (modo === 'color') ponerObjetivo(a, { temperatura: null, color: { h: 218, s: 95, v: brillo } });
+    else ponerObjetivo(a, { temperatura: null, color: null });
   }
 
   async function borrar() {
@@ -392,8 +530,20 @@
   </div>
 {/snippet}
 
-{#snippet foto(src: string | null, tipo: Tipo)}
-  {#if src}<img {src} alt="" draggable="false" />{:else}<Ilustracion {tipo} />{/if}
+{#snippet tresOpciones(etiqueta: string, lista: { valor: string; nombre: string }[], actual: string, elegir: (v: string) => void)}
+  <div class="opciones vidrio" role="group" aria-label={etiqueta}>
+    {#each lista as o (o.valor)}
+      <button type="button" class:elegido={actual === o.valor} aria-pressed={actual === o.valor} onclick={() => elegir(o.valor)}>
+        {o.nombre}
+      </button>
+    {/each}
+  </div>
+{/snippet}
+
+{#snippet foto(src: string | null, tipo: Tipo, hogar?: AparatoCasa)}
+  {#if hogar}
+    <IlustracionAparato clase={hogar.clase} forma={hogar.forma} encendido color={hogar.clase === 'luz' ? 'rgb(255 214 160)' : null} />
+  {:else if src}<img {src} alt="" draggable="false" />{:else}<Ilustracion {tipo} />{/if}
 {/snippet}
 
 {#if abierto}
@@ -457,8 +607,8 @@
                 {@const ver = verPaso(a)}
                 <li class="paso inserto">
                   <div class="paso__cabeza">
-                    {#if ver.foto || ver.tipo}
-                      <span class="foto-aparato chica" aria-hidden="true">{@render foto(ver.foto, ver.tipo ?? 'otro')}</span>
+                    {#if ver.foto || ver.tipo || ver.hogar}
+                      <span class="foto-aparato chica" aria-hidden="true">{@render foto(ver.foto, ver.tipo ?? 'otro', ver.hogar)}</span>
                     {:else}
                       <span class="ficha-icono chica" aria-hidden="true"><Icono nombre={ver.icono} tamano={16} /></span>
                     {/if}
@@ -540,7 +690,77 @@
                       <p class="nota">Solo abre apps; nada más.</p>
                     </div>
                   {:else if a.tipo === 'luces'}
-                    <p class="nota">Disponible cuando conectes tus luces. Mientras tanto, este paso se salta.</p>
+                    {@const o = a.objetivo}
+                    <div class="paso__control">
+                      <MenuDesplegable
+                        opciones={opcionesDe(a)}
+                        valor={claveDestino(a.destino)}
+                        etiqueta="Qué aparatos"
+                        oncambio={(v) => ponerDestino(a, v)}
+                      />
+                      {@render dosOpciones(
+                        'Encender o apagar',
+                        { valor: 'si', nombre: 'Encender' },
+                        { valor: 'no', nombre: 'Apagar' },
+                        o?.encendido === false ? 'no' : 'si',
+                        (v) => ponerObjetivo(a, { encendido: v === 'si' }),
+                      )}
+                      {#if o?.encendido !== false}
+                        <div class="valor">
+                          <Deslizador
+                            valor={o?.brillo ?? 80}
+                            minimo={1}
+                            etiqueta="Brillo"
+                            color="amarillo"
+                            oncambio={(v) => ponerObjetivo(a, { brillo: Math.max(1, v), color: o?.color ? { ...o.color, v: Math.max(1, v) } : null })}
+                          />
+                          <span class="valor__numero">{o?.brillo ?? 80} %</span>
+                        </div>
+                        {@render tresOpciones(
+                          'Color de la luz',
+                          [
+                            { valor: 'igual', nombre: 'Como esté' },
+                            { valor: 'blanco', nombre: 'Blanco' },
+                            { valor: 'color', nombre: 'Color' },
+                          ],
+                          modoDe(o),
+                          (v) => ponerModo(a, v),
+                        )}
+                        {#if modoDe(o) === 'blanco'}
+                          <div class="valor">
+                            <span class="extremo">Cálido</span>
+                            <Deslizador
+                              valor={o?.temperatura ?? 50}
+                              etiqueta="Blanco, de cálido a frío"
+                              pista={PISTA_BLANCO}
+                              oncambio={(v) => ponerObjetivo(a, { temperatura: v })}
+                            />
+                            <span class="extremo">Frío</span>
+                          </div>
+                        {:else if modoDe(o) === 'color'}
+                          <div class="muestras" role="group" aria-label="Color">
+                            {#each MUESTRAS as m (m.nombre)}
+                              {@const elegida = !!o?.color && Math.abs(o.color.h - m.h) < 8}
+                              <button
+                                type="button"
+                                class="muestra"
+                                class:elegida
+                                style:--m={cssDeHsv({ h: m.h, s: m.s, v: 100 })}
+                                aria-label={m.nombre}
+                                aria-pressed={elegida}
+                                use:tooltip={m.nombre}
+                                onclick={() => ponerObjetivo(a, { color: { h: m.h, s: m.s, v: o?.brillo ?? 80 }, temperatura: null })}
+                              ></button>
+                            {/each}
+                          </div>
+                        {/if}
+                      {/if}
+                      {#if !hayCuentas(casa)}
+                        <p class="nota aviso">Conecta tus luces en Ajustes › Casa para que este paso corra.</p>
+                      {:else}
+                        <p class="nota">Lo que una luz no sabe hacer (color o blanco cálido) se deja afuera.</p>
+                      {/if}
+                    </div>
                   {:else if a.tipo === 'desconocida'}
                     <p class="nota">Este paso es de una versión más nueva de Nexo y se salta.</p>
                   {/if}
@@ -566,7 +786,7 @@
               <span class="agregar-aparato__icono" aria-hidden="true"><Icono nombre="mas" tamano={18} /></span>
               <span class="agregar-aparato__textos">
                 <span class="agregar-aparato__titulo">Agregar dispositivo</span>
-                <span class="agregar-aparato__ayuda">Conectarlo, usarlo para el sonido, su volumen o el brillo de una pantalla</span>
+                <span class="agregar-aparato__ayuda">Conectarlo, usarlo para el sonido, el brillo de una pantalla o encender una luz</span>
               </span>
             </button>
           {:else}
@@ -593,7 +813,7 @@
               {#if elegido}
                 {@const e = elegido}
                 <div class="elegido">
-                  <span class="foto-aparato" aria-hidden="true">{@render foto(e.foto, e.tipo)}</span>
+                  <span class="foto-aparato" aria-hidden="true">{@render foto(e.foto, e.tipo, e.hogar)}</span>
                   <span class="elegido__textos">
                     <span class="elegido__nombre">{e.nombre}</span>
                     <span class="elegido__equipo">En {e.equipo || 'este equipo'}</span>
@@ -612,19 +832,25 @@
                 <p class="nota">
                   {e.clase === 'pantalla'
                     ? 'El brillo se ajusta en su paso, arriba.'
-                    : 'Cada toque agrega un paso al final; luego puedes cambiarles el orden.'}
+                    : e.clase === 'casa'
+                      ? 'Cada toque agrega un paso al final; ahí eliges el brillo y el color.'
+                      : 'Cada toque agrega un paso al final; luego puedes cambiarles el orden.'}
                 </p>
               {:else}
                 {#each grupos as g (g.equipo)}
                   <div class="grupo-aparatos">
-                    <p class="rotulo">{g.local ? `Este equipo${g.equipo ? ` · ${g.equipo}` : ''}` : g.equipo}</p>
+                    <p class="rotulo">
+                      {g.equipo === 'Tu casa' ? 'Tu casa' : g.local ? `Este equipo${g.equipo ? ` · ${g.equipo}` : ''}` : g.equipo}
+                    </p>
                     {#if g.aparatos.length}
                       <div class="aparatos">
                         {#each g.aparatos as e (e.clave)}
                           <button type="button" class="aparato-op" disabled={!e.local} onclick={() => elegir(e)}>
-                            <span class="foto-aparato" aria-hidden="true">{@render foto(e.foto, e.tipo)}</span>
+                            <span class="foto-aparato" aria-hidden="true">{@render foto(e.foto, e.tipo, e.hogar)}</span>
                             <span class="aparato-op__nombre">{e.nombre}</span>
-                            <span class="aparato-op__equipo">{e.local ? `En ${e.equipo || 'este equipo'}` : `Está en ${e.equipo}`}</span>
+                            <span class="aparato-op__equipo">
+                              {e.hogar ? tipoDe(e.hogar) : e.local ? `En ${e.equipo || 'este equipo'}` : `Está en ${e.equipo}`}
+                            </span>
                           </button>
                         {/each}
                       </div>
@@ -929,6 +1155,32 @@
     font-size: 13px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+  }
+  .extremo {
+    flex-shrink: 0;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--texto-3);
+  }
+  .muestras {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .muestra {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--m);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15);
+  }
+  .muestra.elegida {
+    box-shadow:
+      inset 0 0 0 1px rgb(0 0 0 / 0.15),
+      0 0 0 2px var(--superficie),
+      0 0 0 3.5px var(--primario);
   }
   .nota,
   .vacio {

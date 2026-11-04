@@ -5,6 +5,8 @@
 // a la que le falla un paso, `&setup=escena` abre el editor de la primera escena y `&setup=aparatos`, además,
 // la lista para agregar un dispositivo.
 import { invoke } from '@tauri-apps/api/core';
+import { pruebaCasa } from './api-hogar';
+import type { Objetivo } from './tipos-hogar';
 import type {
   Accion,
   AvanceEscena,
@@ -140,7 +142,11 @@ function guardarMapaEjemplo(mapa: MapaSetup): Promise<MapaSetup> {
   return new Promise((listo) => setTimeout(() => listo(structuredClone(mapaEjemplo)), 300));
 }
 
-// Las mismas cuatro que arma Rust la primera vez en la Mac (escenas.rs, `por_defecto`).
+/** El paso de luces que Rust suma a las escenas de fábrica al conectar las luces (escenas.rs, `sumar_luces`). */
+const luces = (objetivo: Objetivo): Accion[] =>
+  pruebaCasa === 'nada' ? [] : [{ tipo: 'luces', destino: { tipo: 'todos', clase: 'luz' }, objetivo, nombre: 'todas las luces' }];
+
+// Las mismas cuatro que arma Rust la primera vez en la Mac (escenas.rs, `por_defecto`), con sus luces.
 const escenasEjemplo: EstadoEscenas = {
   escenas: [
     {
@@ -150,6 +156,7 @@ const escenasEjemplo: EstadoEscenas = {
         { tipo: 'conectar', dispositivo: SONY, nombre: 'WH-CH520' },
         { tipo: 'salida', dispositivo: SONY, nombre: 'WH-CH520' },
         { tipo: 'volumen', valor: 40 },
+        ...luces({ encendido: true, brillo: 85, temperatura: 70, color: null }),
       ],
     },
     {
@@ -157,6 +164,7 @@ const escenasEjemplo: EstadoEscenas = {
       acciones: [
         { tipo: 'modoTrabajo', activo: true },
         { tipo: 'brillo', pantalla: 'todas', valor: 0 },
+        ...luces({ encendido: false, brillo: null, temperatura: null, color: null }),
       ],
     },
     {
@@ -164,6 +172,7 @@ const escenasEjemplo: EstadoEscenas = {
       acciones: [
         { tipo: 'brillo', pantalla: 'todas', valor: 15 },
         { tipo: 'volumen', valor: 20 },
+        ...luces({ encendido: true, brillo: 20, temperatura: 0, color: null }),
       ],
     },
     {
@@ -173,6 +182,7 @@ const escenasEjemplo: EstadoEscenas = {
         { tipo: 'salida', dispositivo: SONY, nombre: 'WH-CH520' },
         { tipo: 'volumenMicrofono', valor: 80 },
         { tipo: 'volumen', valor: 60 },
+        ...luces({ encendido: true, brillo: 90, temperatura: 50, color: null }),
       ],
     },
   ],
@@ -225,7 +235,10 @@ async function activarEjemplo(id: string): Promise<ResultadoAccion[]> {
 }
 
 function resultadoEjemplo(accion: Accion): ResultadoAccion {
-  if (accion.tipo === 'luces') return { accion, ok: true, error: 'Disponible cuando conectes tus luces.', omitida: true };
+  if (accion.tipo === 'luces' && (!accion.destino || !accion.objetivo))
+    return { accion, ok: true, error: 'Elige en el editor qué luces y cómo deben quedar.', omitida: true };
+  if (accion.tipo === 'luces' && pruebaCasa === 'nada')
+    return { accion, ok: false, error: 'Conecta tus luces en Ajustes › Casa para que este paso corra.', omitida: false };
   if (accion.tipo === 'conectar' && pruebaSetup === 'fallo')
     return { accion, ok: false, error: 'No se pudo conectar. Revisa que esté encendido y cerca.', omitida: false };
   return { accion, ok: true, error: null, omitida: false };

@@ -2,7 +2,8 @@
   Escritorio: la escena de un lugar (casa u oficina) vista de frente, con la profundidad fingida y barata de un
   diorama: la pared, la mesa (su cara de arriba y su canto) y tres capas. Lo del fondo va más chico y más arriba.
   Cada cosa es una foto sin fondo con su sombra de apoyo; lo encendido lleva un resplandor verde debajo y lo
-  apagado se ve tenue. Las decoraciones no muestran estado.
+  apagado se ve tenue. Las luces de la casa brillan con su propio color (y su resplandor es de ese color).
+  Las decoraciones no muestran estado.
   - A la vista: tocar un aparato de este equipo abre su página en Nexo; uno del otro equipo muestra su ficha.
   - Al editar: se arrastra (a lo ancho, y hacia atrás o adelante entre capas) y se agranda desde la esquina.
     Con el teclado: flechas para mover, + y − para el tamaño, Supr para quitar y Esc para soltar la elección.
@@ -13,6 +14,7 @@
   import { PROPORCION, acotarX, arribaVisible, capaCercana } from '$lib/setup';
   import { cuando } from '$lib/tiempo';
   import Ilustracion from './Ilustracion.svelte';
+  import IlustracionAparato from './IlustracionAparato.svelte';
   import Icono from './Icono.svelte';
 
   type Cambio = { x?: number; y?: number; capa?: number; escala?: number };
@@ -274,6 +276,7 @@
         style:--arriba={arribaVisible(p.forma)}
         style:--abajo={p.forma.caja[3]}
         style:--aplastar={p.forma.aplastar ?? 1}
+        style:--luz-apoyo={p.hogar?.color ?? undefined}
       >
         {#if !p.forma.pared && !p.colgada}
           <span class="apoyo" class:brillo={p.estado === 'encendido'} aria-hidden="true"></span>
@@ -281,6 +284,15 @@
         <span class="visual" aria-hidden="true">
           {#if p.forma.foto}
             <img src={p.forma.foto} alt="" draggable="false" decoding="async" />
+          {:else if p.hogar}
+            <IlustracionAparato
+              clase={p.hogar.clase}
+              forma={p.hogar.forma}
+              encendido={p.hogar.encendido}
+              color={p.hogar.color}
+              abierto={p.hogar.abierto}
+              enMapa
+            />
           {:else if p.forma.ilustracion === 'torre'}
             {@render torre(p.estado === 'encendido')}
           {:else if p.forma.ilustracion}
@@ -453,7 +465,7 @@
     top: calc(var(--abajo) * 100% - (var(--der) - var(--izq)) * 8%);
     height: calc((var(--der) - var(--izq)) * 16%);
     background:
-      radial-gradient(closest-side, color-mix(in srgb, var(--exito) 55%, transparent), transparent),
+      radial-gradient(closest-side, color-mix(in srgb, var(--luz-apoyo, var(--exito)) 55%, transparent), transparent),
       radial-gradient(closest-side, var(--sombra-apoyo), transparent);
   }
   .plano .apoyo {

@@ -37,6 +37,7 @@
   import Icono, { type Nombre } from '$lib/componentes/Icono.svelte';
   import VistaInicio from '$lib/vistas/Inicio.svelte';
   import VistaSetup from '$lib/vistas/MiSetup.svelte';
+  import VistaCasa from '$lib/vistas/Casa.svelte';
   import VistaDispositivos from '$lib/vistas/Dispositivos.svelte';
   import VistaAudio from '$lib/vistas/Audio.svelte';
   import VistaPantallas from '$lib/vistas/Pantallas.svelte';
@@ -52,6 +53,7 @@
   type Seccion =
     | 'inicio'
     | 'setup'
+    | 'casa'
     | 'dispositivos'
     | 'audio'
     | 'pantallas'
@@ -68,6 +70,7 @@
   const secciones: { id: Seccion; nombre: string; icono: Nombre }[] = [
     { id: 'inicio', nombre: 'Inicio', icono: 'inicio' },
     { id: 'setup', nombre: 'Mi setup', icono: 'setup' },
+    { id: 'casa', nombre: 'Casa', icono: 'casa' },
     { id: 'dispositivos', nombre: 'Dispositivos', icono: 'dispositivos' },
     { id: 'audio', nombre: 'Audio', icono: 'audio' },
     { id: 'pantallas', nombre: 'Pantallas', icono: 'pantallas' },
@@ -100,6 +103,8 @@
   let seccion = $state<Seccion>(
     aparatoPedido ? 'dispositivos' : esSeccion(pedida) ? pedida : seccionGuardada(),
   );
+  // Lo que se pidió al ir a Casa ("buscar") o a Ajustes ("casa"); fuera de la app, `?pedido=`.
+  let pedido = $state<string | null>(parametros.get('pedido'));
   // El aparato elegido en Dispositivos: se mantiene al ir y volver de otras secciones.
   let dispositivoElegido = $state<string | null>(aparatoPedido);
   // Si Dispositivos muestra la página completa del aparato (true) o la lista con el panel (false).
@@ -185,6 +190,8 @@
   // sin aparato (la barra lateral, "Ver todos") vuelve a la lista.
   function ir(destino: string, id?: string) {
     if (!esSeccion(destino)) return;
+    // Casa con "buscar" empieza la búsqueda; Ajustes con "casa" va a la sección de las cuentas de la casa.
+    pedido = destino === 'casa' || destino === 'ajustes' ? (id ?? null) : null;
     if (destino === 'dispositivos') {
       if (id) dispositivoElegido = id;
       paginaDispositivo = !!id;
@@ -363,6 +370,8 @@
               <VistaInicio {estado} {pantallas} {nombre} onir={ir} onalternar={alternar} {pendienteId} />
             {:else if seccion === 'setup'}
               <VistaSetup {estado} {pantallas} onir={ir} onerror={mostrarAviso} />
+            {:else if seccion === 'casa'}
+              <VistaCasa buscarAlEntrar={pedido === 'buscar'} onir={ir} onerror={mostrarAviso} />
             {:else if seccion === 'dispositivos'}
               <VistaDispositivos
                 {estado}
@@ -388,7 +397,7 @@
             {:else if seccion === 'automatizaciones'}
               <VistaAutomatizaciones dispositivos={estado?.dispositivos ?? []} onerror={mostrarAviso} />
             {:else if seccion === 'ajustes'}
-              <VistaAjustes {nombre} onnombre={(n) => (nombre = n)} onerror={mostrarAviso} onir={ir} />
+              <VistaAjustes {nombre} onnombre={(n) => (nombre = n)} onerror={mostrarAviso} onir={ir} foco={pedido} />
             {/if}
           </div>
         {/key}

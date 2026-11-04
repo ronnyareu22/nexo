@@ -7,8 +7,10 @@
     Este equipo se ve en vivo; el otro llega por Nexo Drop (`setup_estado`). Si está apagado, lo último que se vio
     queda tenue. "Editar mi setup" deja arrastrar, agrandar, quitar y sumar cosas (lo detectado por Nexo y
     decoraciones); "Listo" lo guarda.
-  - Al final, la nota de las luces.
-  Liviano: se relee cada 15 s solo con la ventana a la vista (y al volver a ella); sin bucles ni animaciones.
+  - Al final, las luces del escritorio (las de la habitación Escritorio de Casa): encender, apagar y su brillo. Sin
+    luces conectadas, un estado calmo que lleva a Ajustes › Casa. Las luces también van en el mapa, con su color.
+  Liviano: se relee cada 15 s solo con la ventana a la vista (las luces, además, solo con la ventana enfocada);
+  sin bucles ni animaciones.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -55,6 +57,7 @@
     comoDispositivo,
     encajar,
     formaDeEquipo,
+    formaDeHogar,
     fotoMonitor,
     haciendo,
     iconoEscena,
@@ -71,6 +74,11 @@
     type Ubicada,
   } from '$lib/setup';
   import { modeloDe } from '$lib/catalogo';
+  import { alCambiarCasa, ejecutarEnCasa, leerCasa } from '$lib/api-hogar';
+  import type { Accion as AccionCasa, Aparato as AparatoCasa, EstadoCasa } from '$lib/tipos-hogar';
+  import { delEscritorio, tipoDe } from '$lib/hogar';
+  import LucesEscritorio from '$lib/componentes/LucesEscritorio.svelte';
+  import IlustracionAparato from '$lib/componentes/IlustracionAparato.svelte';
   import { cuando } from '$lib/tiempo';
   import { tooltip } from '$lib/tooltip';
   import Icono from '$lib/componentes/Icono.svelte';
@@ -96,6 +104,60 @@
   let setup = $state<EstadoSetup | null>(null);
   let mapa = $state<MapaSetup | null>(null);
   let escenas = $state<EstadoEscenas | null>(null);
+
+  // ---------------------------------------------------------------- La casa (luces)
+
+  let casa = $state<EstadoCasa | null>(null);
+  const casaVacia = (): EstadoCasa => ({
+    aparatos: [],
+    habitaciones: [],
+    grupos: [],
+    tuya: null,
+    homeAssistant: null,
+    errorTuya: null,
+    errorHa: null,
+    actualizado: null,
+    mostrarTodo: false,
+    ocultos: 0,
+    ejemplo: false,
+    regiones: [],
+  });
+
+  let leyendoCasa = false;
+  async function leerLuces(fresco = true) {
+    if (leyendoCasa) return;
+    leyendoCasa = true;
+    try {
+      casa = await leerCasa(fresco);
+    } catch (e) {
+      casa ??= casaVacia();
+      onerror(String(e));
+    } finally {
+      leyendoCasa = false;
+    }
+  }
+
+  async function ordenCasa(id: string, accion: AccionCasa, confirmado = false) {
+    const r = await ejecutarEnCasa({ destino: { tipo: 'aparato', id }, accion, confirmado });
+    casa = r.estado;
+    if (!r.ok) onerror(r.mensaje);
+  }
+
+  async function todasEscritorio(encender: boolean, grupo: string | null) {
+    try {
+      const r = await ejecutarEnCasa({
+        destino: grupo ? { tipo: 'grupo', id: grupo } : { tipo: 'habitacion', id: 'escritorio', clase: 'luz' },
+        accion: { tipo: encender ? 'encender' : 'apagar' },
+      });
+      casa = r.estado;
+      if (!r.ok) onerror(r.mensaje);
+    } catch (e) {
+      onerror(String(e));
+    }
+  }
+
+  /** Las luces del escritorio: van en el mapa de la primera vez del lugar de este equipo. */
+  const lucesEscritorio = $derived(casa ? delEscritorio(casa) : []);
 
   let leyendo = false;
   async function leer() {
@@ -197,7 +259,7 @@
     if (editando) return borrador[l];
     const guardado = mapa?.[l];
     if (guardado) return guardado.items;
-    return porDefecto(l, lugares.find((x) => x.id === l)?.aparatos ?? null).items;
+    return porDefecto(l, lugares.find((x) => x.id === l)?.aparatos ?? null, l === lugarLocal ? lucesEscritorio : []).items;
   }
 
   const vistas = $derived.by(() => {
@@ -206,7 +268,7 @@
       const piezas = itemsDe(l.id)
         .map((i) => {
           const usarLocal = l.id === lugarLocal && !(i.tipo === 'equipo' && remotosConocidos.has(i.ref));
-          return resolver(i, fuentes, usarLocal ? fuenteLocal : null);
+          return resolver(i, fuentes, usarLocal ? fuenteLocal : null, casa);
         })
         .filter((p) => p !== null);
       r[l.id] = ubicar(piezas);
@@ -284,14 +346,14 @@
 
   function restablecer() {
     const info = lugares.find((l) => l.id === lugarSel);
-    borrador[lugarSel] = porDefecto(lugarSel, info?.aparatos ?? null).items;
+    borrador[lugarSel] = porDefecto(lugarSel, info?.aparatos ?? null, lugarSel === lugarLocal ? lucesEscritorio : []).items;
     seleccion = null;
     tocar();
   }
 
   /** Suma algo al lugar que se edita: donde se soltó o, con un clic, cerca del centro. */
   function agregar(tipo: TipoItem, ref: string, equipo: string | null, forma: Forma, punto?: { x: number; y: number }) {
-    const id = tipo === 'deco' ? null : claveItem(tipo, equipo, ref);
+    const id = tipo === 'deco' ? null : claveItem(tipo, equipo || null, ref);
     if (id && itemDe(id)) {
       seleccion = id;
       return;
@@ -302,10 +364,10 @@
     if (forma.pared) {
       const alto = (forma.caja[3] - forma.caja[1]) * forma.tam * PROPORCION;
       const y = acotarPared(punto ? punto.y + alto / 2 : 32, forma.tam, forma);
-      item = nuevoItem(tipo, ref, equipo, { x, y: redondear(y), capa: 0 });
+      item = nuevoItem(tipo, ref, equipo || null, { x, y: redondear(y), capa: 0 });
     } else {
       const capa = punto ? (punto.y < PARED ? 0 : capaCercana(punto.y)) : 1;
-      item = nuevoItem(tipo, ref, equipo, { x: redondear(x), capa });
+      item = nuevoItem(tipo, ref, equipo || null, { x: redondear(x), capa });
     }
     borrador[lugarSel].push(item);
     tocar();
@@ -323,6 +385,8 @@
     detalle: string;
     forma: Forma;
     marca: string | null;
+    /** Un aparato de la casa (para su dibujo). */
+    hogar?: AparatoCasa;
   }
 
   const detectados = $derived.by(() => {
@@ -370,12 +434,30 @@
       }
       grupos.push({ equipo: nombre, titulo: f.local ? `En ${nombre}, este equipo` : `En ${nombre}`, lista });
     }
+    // La casa: primero lo del escritorio, luego lo demás (luces y enchufes antes que el resto).
+    if (casa?.aparatos.length) {
+      const enEscritorio = new Set(lucesEscritorio.map((a) => a.id));
+      const lista: Detectado[] = casa.aparatos
+        .filter((a) => !a.oculto && !puestos.has(claveItem('hogar', '', a.id)))
+        .sort((a, b) => Number(enEscritorio.has(b.id)) - Number(enEscritorio.has(a.id)))
+        .map((a) => ({
+          tipo: 'hogar' as const,
+          ref: a.id,
+          equipo: '',
+          nombre: a.nombre,
+          detalle: tipoDe(a),
+          forma: formaDeHogar(a),
+          marca: a.marca,
+          hogar: a,
+        }));
+      grupos.push({ equipo: 'casa', titulo: 'En tu casa', lista });
+    }
     return grupos;
   });
 
   /** La forma con la que se ubica en la escena (la del catálogo, no la de la miniatura). */
   function formaReal(d: Detectado): Forma | null {
-    const probe = resolver(nuevoItem(d.tipo, d.ref, d.equipo, { x: 50, capa: 1 }), fuentes, null);
+    const probe = resolver(nuevoItem(d.tipo, d.ref, d.equipo || null, { x: 50, capa: 1 }), fuentes, null, casa);
     return probe?.forma ?? null;
   }
 
@@ -455,6 +537,8 @@
     clearTimeout(temporizadorFin);
     // "Listo" se va solo; si algo falló, queda a la vista hasta la próxima.
     if (ok) temporizadorFin = setTimeout(() => fin?.id === id && fin.ok && (fin = null), 5000);
+    // La escena pudo cambiar las luces.
+    leerLuces(false);
     leerEscenas()
       .then((x) => (escenas = x))
       .catch(() => {});
@@ -522,6 +606,8 @@
 
   onMount(() => {
     leer();
+    leerLuces();
+    const quitarCasa = alCambiarCasa(() => leerLuces(false));
     leerMapa()
       .then((m) => (mapa = m))
       .catch((e) => {
@@ -536,11 +622,15 @@
       })
       .catch((e) => onerror(String(e)));
 
-    // Cada 15 s solo con la ventana a la vista; al volver a ella, enseguida.
+    // Cada 15 s solo con la ventana a la vista; al volver a ella, enseguida. Las luces, solo con la ventana
+    // enfocada: cada lectura es una consulta a Tuya o a Home Assistant.
     let intervalo: ReturnType<typeof setInterval> | undefined;
     const arrancar = () => {
       clearInterval(intervalo);
-      intervalo = setInterval(leer, 15_000);
+      intervalo = setInterval(() => {
+        leer();
+        if (document.hasFocus()) leerLuces();
+      }, 15_000);
     };
     if (document.visibilityState === 'visible') arrancar();
     const alCambiarVista = () => {
@@ -551,7 +641,10 @@
         clearInterval(intervalo);
       }
     };
-    const alEnfocar = () => leer();
+    const alEnfocar = () => {
+      leer();
+      leerLuces();
+    };
     document.addEventListener('visibilitychange', alCambiarVista);
     window.addEventListener('focus', alEnfocar);
 
@@ -568,6 +661,7 @@
       window.removeEventListener('focus', alEnfocar);
       quitarAvance();
       quitarFin();
+      quitarCasa();
     };
   });
 
@@ -622,6 +716,12 @@
   }
 
   function abrir(p: Ubicada) {
+    // Una luz: un toque la enciende o la apaga; lo demás de la casa abre Casa.
+    if (p.item.tipo === 'hogar') {
+      if (p.hogar?.controlable) ordenCasa(p.hogar.id, { tipo: 'alternar' }).catch((e) => onerror(String(e)));
+      else onir('casa');
+      return;
+    }
     if (p.item.tipo === 'aparato' && p.aparatoId) onir('dispositivos', p.aparatoId);
     else onir('pantallas');
   }
@@ -631,9 +731,11 @@
 </script>
 
 <!-- Miniatura de la paleta: la foto real o la ilustración del aparato. -->
-{#snippet miniatura(forma: Forma, marca: string | null)}
+{#snippet miniatura(forma: Forma, marca: string | null, hogar?: AparatoCasa)}
   <span class="mini" aria-hidden="true">
-    {#if forma.foto}
+    {#if hogar}
+      <IlustracionAparato clase={hogar.clase} forma={hogar.forma} encendido enMapa />
+    {:else if forma.foto}
       <img src={forma.foto} alt="" draggable="false" decoding="async" />
     {:else if forma.ilustracion && forma.ilustracion !== 'torre'}
       <Ilustracion tipo={forma.ilustracion} {marca} />
@@ -665,7 +767,7 @@
 <div class="setup">
   <header class="cabecera">
     <h1>Mi setup</h1>
-    <p>Tus escenas de un toque y tus dispositivos donde están, en la casa y en la oficina.</p>
+    <p>Tus escenas de un toque, tus dispositivos donde están y las luces de tu escritorio.</p>
   </header>
 
   <!-- ---------- Escenas ---------- -->
@@ -762,7 +864,7 @@
         <button type="button" class="tarjeta nueva vidrio" onclick={() => (editor = { escena: null })}>
           <span class="tarjeta__escenario"><IlustracionEscena nombre="nueva" icono="mas" /></span>
           <span class="tarjeta__nombre">Nueva escena</span>
-          <span class="tarjeta__resumen">Junta aparatos, brillo, sonido y apps en un solo toque.</span>
+          <span class="tarjeta__resumen">Junta aparatos, luces, brillo, sonido y apps en un solo toque.</span>
         </button>
       </div>
     {:else}
@@ -886,7 +988,7 @@
                       onpointercancel={cancelarPaleta}
                       onclick={(e) => e.detail === 0 && ponerDetectado(d)()}
                     >
-                      {@render miniatura(d.forma, d.marca)}
+                      {@render miniatura(d.forma, d.marca, d.hogar)}
                       <span class="paleta__textos">
                         <span class="paleta__nombre">{d.nombre}</span>
                         <span class="paleta__detalle">{d.detalle}</span>
@@ -974,14 +1076,8 @@
     {/if}
   </section>
 
-  <!-- ---------- Luces ---------- -->
-  <aside class="luces vidrio" aria-labelledby="setup-luces">
-    <span class="ficha-icono" style:--tono="var(--amarillo)"><Icono nombre="bombilla" tamano={19} /></span>
-    <div class="t-textos">
-      <h2 class="t-titulo" id="setup-luces">Luces</h2>
-      <p class="t-sub">Cuando compres tus luces, aparecerán aquí y en las escenas.</p>
-    </div>
-  </aside>
+  <!-- ---------- Luces del escritorio ---------- -->
+  <LucesEscritorio {casa} onorden={ordenCasa} ontodas={todasEscritorio} {onir} {onerror} />
 </div>
 
 {#if fantasma}
@@ -998,6 +1094,7 @@
   equipo={local?.equipo ?? ''}
   {remotos}
   mac={(local?.plataforma ?? 'mac') === 'mac'}
+  {casa}
   onguardar={guardar}
   onborrar={borrar}
   oncerrar={() => (editor = null)}
@@ -1620,12 +1717,4 @@
     translate: 12px 12px;
   }
 
-  /* ---------- Luces ---------- */
-  .luces {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 18px;
-    border-radius: var(--radio-lg);
-  }
 </style>

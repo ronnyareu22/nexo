@@ -1,6 +1,6 @@
 //! Menú del ícono (barra de menús en la Mac, bandeja en Windows): accesos rápidos que siempre están a mano.
 //!
-//! - Orden: captura y XDrop, escenas, sonido, brillo, aparatos, remoto y, al final, abrir, widget y salir.
+//! - Orden: captura y XDrop, escenas, luces (si hay), sonido, brillo, aparatos, remoto y, al final, abrir, widget y salir.
 //!   En el remoto de la Mac va la casilla de la pantalla virtual para RustDesk. Lo del remoto solo aparece con el
 //!   perfil de trabajo remoto encendido (`equipos`: se encontró tu Mac o tu PC, o se eligió "Siempre").
 //! - Abrirlo no lee nada: se arma con lo que ya se sabe. Los aparatos los trae el vigía de lib.rs (cada 20 s) y
@@ -13,7 +13,7 @@
 //!   y avisan cómo salieron con una notificación.
 //! - Sin atajos globales nuevos: en la Mac la captura ya tiene F13.
 
-use super::{ajustes, aviso, drop as xdrop, equipos, escenas, pantalla_virtual, remoto, teclas, widget, widget_brillo};
+use super::{ajustes, aviso, drop as xdrop, equipos, escenas, hogar, pantalla_virtual, remoto, teclas, widget, widget_brillo};
 use crate::dispositivos::audio::{self, Cambio, DispositivoAudio};
 use crate::dispositivos::historial::Historial;
 use crate::dispositivos::pantallas::{Pantalla, Pantallas};
@@ -229,6 +229,8 @@ struct Datos {
     pantalla_virtual: Option<bool>,
     /// El perfil de trabajo remoto está encendido: "Preparar para el trabajo", la pantalla virtual o "Conectar a mi Mac".
     remoto: bool,
+    /// Luces de la casa: `None` sin luces conectadas; si no, los grupos (id, nombre).
+    luces: Option<Vec<(String, String)>>,
 }
 
 impl Datos {
@@ -247,6 +249,7 @@ impl Datos {
             ocupados: Vec::new(),
             pantalla_virtual: None,
             remoto: false,
+            luces: None,
         }
     }
 
@@ -275,6 +278,7 @@ impl Datos {
             ocupados: bloquear(&OCUPADOS).clone(),
             pantalla_virtual: pantalla_virtual::en_menu(),
             remoto: equipos::perfil_activo(&guardados),
+            luces: hogar::menu_bandeja(app),
             ..Datos::vacios()
         }
     }
@@ -326,6 +330,9 @@ fn armar(d: &Datos) -> Vec<Pieza> {
 
     m.push(Pieza::Raya);
     m.push(Pieza::Escenas);
+    if let Some(grupos) = &d.luces {
+        m.push(luces(grupos));
+    }
 
     let sonido = sonido(&d.sonido);
     if !sonido.is_empty() {
@@ -361,6 +368,20 @@ fn armar(d: &Datos) -> Vec<Pieza> {
     m.push(Pieza::Widget);
     m.push(item("salir", "Salir de Nexo"));
     m
+}
+
+/// "Luces": encender o apagar todas y, por cada grupo, su propio submenú.
+fn luces(grupos: &[(String, String)]) -> Pieza {
+    let mut hijos = vec![item("casa:encender:todas", "Encender todas"), item("casa:apagar:todas", "Apagar todas")];
+    if !grupos.is_empty() {
+        hijos.push(Pieza::Raya);
+        hijos.extend(grupos.iter().take(MAX_APARATOS).map(|(id, nombre)| Pieza::Sub {
+            id: format!("casa-grupo:{id}"),
+            texto: corto(nombre),
+            hijos: vec![item(format!("casa:encender:g:{id}"), "Encender"), item(format!("casa:apagar:g:{id}"), "Apagar")],
+        }));
+    }
+    Pieza::Sub { id: "luces".into(), texto: "Luces".into(), hijos }
 }
 
 /// "Enviar … a innotech1017" con un destino; con varios, un submenú con sus nombres. Sin destinos, nada.
@@ -615,6 +636,7 @@ fn elegir(app: &AppHandle, id: &str) {
         }
         "salir" => app.exit(0),
         _ if id.starts_with("escena:") => escenas::desde_bandeja(app, id),
+        _ if id.starts_with("casa:") => hogar::elegir_en_bandeja(app, &id["casa:".len()..]),
         _ => {
             tauri::async_runtime::spawn(accion(app.clone(), id.to_string()));
         }
@@ -960,6 +982,7 @@ mod pruebas {
             ocupados: Vec::new(),
             pantalla_virtual: Some(false),
             remoto: true,
+            luces: None,
         }
     }
 
@@ -1104,6 +1127,27 @@ mod pruebas {
         datos.aparatos = Some((false, datos.aparatos.take().map(|(_, l)| l).unwrap_or_default()));
         let m = armar(&datos);
         assert!(matches!(m.iter().find(|p| llave(p) == (0, "bluetooth-apagado")), Some(Pieza::Item { activo: false, .. })));
+    }
+
+    #[test]
+    fn bandeja_luces_con_grupos() {
+        // Sin luces conectadas, no hay submenú.
+        assert!(!ids(&armar(&mac_completa())).iter().any(|i| i == "luces"));
+        let grupos = vec![("g1".to_string(), "Escritorio".to_string())];
+        let m = armar(&Datos { luces: Some(grupos), ..mac_completa() });
+        let lista = ids(&m);
+        assert_eq!(&lista[5..9], ["-", "escenas", "luces", "-"]);
+        let Some(Pieza::Sub { hijos, .. }) = m.iter().find(|p| llave(p) == (2, "luces")) else {
+            panic!("falta el submenú de luces");
+        };
+        assert_eq!(ids(hijos), ["casa:encender:todas", "casa:apagar:todas", "-", "casa-grupo:g1"]);
+        assert_eq!(texto_de(hijos, "casa-grupo:g1"), Some("Escritorio"));
+        // Sin grupos: solo encender y apagar todas.
+        let m = armar(&Datos { luces: Some(Vec::new()), ..mac_completa() });
+        let Some(Pieza::Sub { hijos, .. }) = m.iter().find(|p| llave(p) == (2, "luces")) else {
+            panic!("falta el submenú de luces");
+        };
+        assert_eq!(hijos.len(), 2);
     }
 
     #[test]

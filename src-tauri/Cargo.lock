@@ -2208,8 +2208,10 @@ name = "nexo"
 version = "0.1.0"
 dependencies = [
  "block2",
+ "core-foundation",
  "ddc",
  "ddc-macos",
+ "dispatch2",
  "libc",
  "objc2",
  "objc2-foundation",

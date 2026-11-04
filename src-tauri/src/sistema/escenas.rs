@@ -2,11 +2,13 @@
 //!
 //! - Se guardan en `escenas.json`. La primera vez se crean cuatro con los aparatos que haya (Modo estudio,
 //!   remoto, noche y reunión); si un aparato no está emparejado, esa acción no va.
-//! - Solo hacen lo que Nexo ya controla en este equipo. `luces` queda a la espera: nunca se ejecuta.
+//! - Solo hacen lo que Nexo ya controla en este equipo. El paso `luces` lleva aparatos de la casa (luces, enchufes,
+//!   la tele…) a un estado: encendidos o apagados, con brillo y blanco o color (ver `hogar`).
 //! - `activar_escena` corre las acciones en orden, fuera del hilo principal, y devuelve cómo salió cada una.
 //!   Avisa el avance con "escena-progreso" y el final con "escena-activa". Una escena a la vez.
 //! - La bandeja tiene un submenú "Escenas" que se rehace cuando cambian.
 
+use super::hogar::modelo::{Clase, Destino, Hsv, Objetivo};
 use crate::dispositivos;
 use crate::dispositivos::pantallas::{Pantalla, Pantallas};
 use serde::{Deserialize, Serialize};
@@ -60,8 +62,17 @@ pub enum Accion {
     ModoTrabajo { activo: bool },
     /// Solo abre apps: en Mac con `open -a`; en Windows, el acceso del menú Inicio o el .exe.
     AbrirApp { nombre: String },
-    /// Para cuando lleguen las luces: se muestra, pero no se ejecuta.
-    Luces {},
+    /// Aparatos de la casa (luces, enchufes, la tele…): a quién y cómo deben quedar. Sin destino (un paso de una
+    /// versión vieja), se salta hasta que se elija en el editor.
+    Luces {
+        #[serde(default)]
+        destino: Option<Destino>,
+        #[serde(default)]
+        objetivo: Option<Objetivo>,
+        /// Para mostrarlo aunque la casa no esté a la vista ("Todas las luces", "Escritorio").
+        #[serde(default)]
+        nombre: Option<String>,
+    },
     /// Un paso de una versión más nueva de Nexo: se salta.
     #[serde(other)]
     Desconocida,
@@ -225,9 +236,33 @@ fn limpiar_accion(a: Accion) -> Result<Option<Accion>, String> {
         Accion::AbrirApp { nombre } => Accion::AbrirApp {
             nombre: nombre_app_valido(&nombre).ok_or("Escribe el nombre de la app que quieres abrir.")?,
         },
-        Accion::Luces {} => Accion::Luces {},
+        Accion::Luces { destino, objetivo, nombre } => Accion::Luces {
+            destino: destino.and_then(limpiar_destino),
+            objetivo: objetivo.map(|o| Objetivo {
+                encendido: o.encendido,
+                brillo: o.brillo.map(|b| b.clamp(1, 100)),
+                temperatura: o.temperatura.map(|t| t.min(100)),
+                color: o.color.map(|c| Hsv::nuevo(c.h as i64, c.s as i64, c.v as i64)),
+            }),
+            nombre: nombre.map(|n| limpiar_texto(&n, 80)).filter(|n| !n.is_empty()),
+        },
         Accion::Desconocida => return Ok(None),
     }))
+}
+
+/// Un destino con ids y textos cortos; si no sirve, el paso queda sin destino (se elige en el editor).
+fn limpiar_destino(d: Destino) -> Option<Destino> {
+    let corto = |t: &str| !t.is_empty() && t.len() <= 200 && !t.chars().any(char::is_control);
+    match d {
+        Destino::Todos { clase } => Some(Destino::Todos { clase }),
+        Destino::Aparato { id } => corto(&id).then_some(Destino::Aparato { id }),
+        Destino::Grupo { id } => corto(&id).then_some(Destino::Grupo { id }),
+        Destino::Habitacion { id, clase } => corto(&id).then_some(Destino::Habitacion { id, clase }),
+        Destino::Nombre { texto, clase } => {
+            let t = limpiar_texto(&texto, 80);
+            (!t.is_empty()).then_some(Destino::Nombre { texto: t, clase })
+        }
+    }
 }
 
 /// Revisa una escena antes de guardarla: nombre, ícono conocido, de 1 a 20 pasos y cada paso con lo suyo.
@@ -575,7 +610,10 @@ async fn ejecutar(app: &AppHandle, accion: &Accion) -> Result<Paso, String> {
         Accion::VolumenMicrofono { valor } => volumen(valor, true).await,
         Accion::ModoTrabajo { activo } => modo_trabajo(app, activo).await,
         Accion::AbrirApp { nombre } => en_hilo(move || abrir_app(&nombre)).await.map(|_| Paso::Hecho),
-        Accion::Luces {} => Ok(Paso::Omitido("Disponible cuando conectes tus luces.".into())),
+        Accion::Luces { destino: Some(destino), objetivo: Some(objetivo), .. } => {
+            super::hogar::aplicar_objetivo(app.clone(), destino, objetivo).await.map(|_| Paso::Hecho)
+        }
+        Accion::Luces { .. } => Ok(Paso::Omitido("Elige en el editor qué luces y cómo deben quedar.".into())),
         Accion::Desconocida => Ok(Paso::Omitido("Este paso es de una versión más nueva de Nexo.".into())),
     }
 }
@@ -620,6 +658,38 @@ pub async fn activar(app: AppHandle, id: String) -> Result<(String, Vec<Resultad
     .await;
     let _ = app.emit("escena-activa", Fin { id, resultados: resultados.clone() });
     Ok((escena.nombre, resultados))
+}
+
+// ---------------------------------------------------------------- Luces en las escenas de fábrica
+
+/// La primera vez que hay luces: se suman a las escenas de fábrica que sigan existiendo (una sola vez; lo que la
+/// persona ya puso no se toca). Estudio: blanco frío y claro; noche: cálido y bajo; reunión: neutro y claro; en la
+/// Mac, el modo remoto las apaga (te fuiste de la casa).
+pub fn sumar_luces(app: &AppHandle) -> Result<(), String> {
+    let mac = cfg!(target_os = "macos");
+    cambiar(app, true, |a| {
+        for e in &mut a.escenas {
+            let objetivo = match e.id.as_str() {
+                "estudio" => Objetivo { encendido: true, brillo: Some(85), temperatura: Some(70), color: None },
+                "noche" => Objetivo { encendido: true, brillo: Some(20), temperatura: Some(0), color: None },
+                "reunion" => Objetivo { encendido: true, brillo: Some(90), temperatura: Some(50), color: None },
+                "remoto" if mac => Objetivo { encendido: false, brillo: None, temperatura: None, color: None },
+                _ => continue,
+            };
+            if e.acciones.iter().any(|x| matches!(x, Accion::Luces { destino: Some(_), .. })) {
+                continue;
+            }
+            e.acciones.retain(|x| !matches!(x, Accion::Luces { .. }));
+            if e.acciones.len() < MAX_PASOS {
+                e.acciones.push(Accion::Luces {
+                    destino: Some(Destino::Todos { clase: Some(Clase::Luz) }),
+                    objetivo: Some(objetivo),
+                    nombre: Some("todas las luces".into()),
+                });
+            }
+        }
+        Ok(())
+    })
 }
 
 // ---------------------------------------------------------------- Bandeja
@@ -667,7 +737,14 @@ fn describir(a: &Accion) -> String {
         Accion::ModoTrabajo { activo: true } => "Encender el modo trabajo".into(),
         Accion::ModoTrabajo { activo: false } => "Apagar el modo trabajo".into(),
         Accion::AbrirApp { nombre } => format!("Abrir {nombre}"),
-        Accion::Luces {} => "Luces".into(),
+        Accion::Luces { nombre, objetivo, .. } => {
+            let que = nombre.clone().unwrap_or_else(|| "las luces".into());
+            match objetivo {
+                Some(o) if !o.encendido => format!("Apagar {que}"),
+                Some(_) => format!("Encender {que}"),
+                None => "Luces".into(),
+            }
+        }
         Accion::Desconocida => "Un paso nuevo".into(),
     }
 }
@@ -841,10 +918,28 @@ mod pruebas {
         assert!(e.is_ok());
         let e = e.unwrap_or_else(|_| por_defecto(None, true).remove(0));
         assert_eq!(e.acciones.len(), 6);
-        assert_eq!(e.acciones[4], Accion::Luces {});
+        assert_eq!(e.acciones[4], Accion::Luces { destino: None, objetivo: None, nombre: None });
         assert_eq!(e.acciones[5], Accion::Desconocida);
         let texto = serde_json::to_string(&e.acciones[1]).unwrap_or_default();
         assert_eq!(texto, r#"{"tipo":"volumenMicrofono","valor":50}"#);
+    }
+
+    #[test]
+    fn escenas_paso_de_luces() {
+        let json = r#"{"tipo":"luces","destino":{"tipo":"grupo","id":"g1"},"objetivo":{"encendido":true,"brillo":0,"temperatura":250,"color":null},"nombre":" Escritorio\u0007 "}"#;
+        let a: Result<Accion, _> = serde_json::from_str(json);
+        assert!(a.is_ok());
+        let limpia = limpiar_accion(a.unwrap_or(Accion::Desconocida)).ok().flatten();
+        assert_eq!(
+            limpia,
+            Some(Accion::Luces {
+                destino: Some(Destino::Grupo { id: "g1".into() }),
+                objetivo: Some(Objetivo { encendido: true, brillo: Some(1), temperatura: Some(100), color: None }),
+                nombre: Some("Escritorio".into()),
+            })
+        );
+        let apagar = Accion::Luces { destino: None, objetivo: Some(Objetivo { encendido: false, brillo: None, temperatura: None, color: None }), nombre: None };
+        assert_eq!(describir(&apagar), "Apagar las luces");
     }
 
     #[test]

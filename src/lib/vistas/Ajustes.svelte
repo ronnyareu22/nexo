@@ -1,6 +1,7 @@
 <!-- Ajustes: apariencia, tu nombre, arranque, widget de escritorio, permisos, tus equipos (el trabajo remoto:
-     Automático, Siempre o Nunca, y qué equipo encontró Nexo), historial y "Acerca de", en filas como los
-     Ajustes del Sistema. Mientras falte un permiso, se revisa cada 3 s para mostrar cuando ya está. -->
+     Automático, Siempre o Nunca, y qué equipo encontró Nexo), la casa (Tuya / Smart Life y Home Assistant),
+     historial y "Acerca de", en filas como los Ajustes del Sistema. Mientras falte un permiso, se revisa cada 3 s
+     para mostrar cuando ya está. Con `foco="casa"` (desde Casa o Mi setup) se baja a la sección de la casa. -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
@@ -24,20 +25,24 @@
   import NexoBot from '$lib/componentes/NexoBot.svelte';
   import Dialogo from '$lib/componentes/Dialogo.svelte';
   import FilaActualizacion from '$lib/componentes/FilaActualizacion.svelte';
+  import AjustesCasa from '$lib/componentes/AjustesCasa.svelte';
 
   let {
     nombre = '',
     onnombre,
     onerror,
     onir,
+    foco = null,
   }: {
     /** El nombre con que Nexo saluda en Inicio. */
     nombre?: string;
     /** Se guardó un nombre nuevo (para que Inicio salude con él). */
     onnombre?: (nombre: string) => void;
     onerror: (texto: string) => void;
-    /** Lleva a otra sección (la guía para conectar tus equipos, en Remoto). */
-    onir?: (seccion: string) => void;
+    /** Lleva a otra sección (la guía para conectar tus equipos, en Remoto; Casa). */
+    onir?: (seccion: string, id?: string) => void;
+    /** "casa": baja a la sección de la casa al abrir. */
+    foco?: string | null;
   } = $props();
 
   // --- Tus equipos: el trabajo remoto ---
@@ -256,6 +261,9 @@
   }
 
   onMount(() => {
+    // Se baja cuando ya llegaron los permisos y las cuentas (antes, la página todavía crece).
+    if (foco === 'casa')
+      setTimeout(() => document.getElementById('ajustes-casa')?.scrollIntoView({ block: 'start' }), 450);
     recargar();
     leerArranque()
       .then((a) => (arranque = a))
@@ -430,6 +438,8 @@
           <div class="fila cargando" aria-busy="true"><span class="linea"></span><span class="solo-lector">Buscando tus equipos…</span></div>
         {/if}
       </section>
+
+      <AjustesCasa {onerror} {onir} />
 
       <section class="panel vidrio" aria-labelledby="ajustes-historial">
         <h2 class="rotulo" id="ajustes-historial">Historial</h2>

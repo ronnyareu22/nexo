@@ -2,6 +2,7 @@
 //! permisos, abrir Nexo al iniciar sesión, el widget de escritorio, el remoto (RustDesk por Tailscale)
 //! y Nexo Drop (archivos, textos y enlaces entre los equipos del dueño por Tailscale).
 //! Mi setup: el mapa de la casa y la oficina (`setup`) y las escenas de un toque (`escenas`).
+//! La casa: luces y enchufes por la nube de Tuya, la red local y Bluetooth (`hogar`).
 //! Tus equipos en Tailscale y el perfil de trabajo remoto, que se enciende al encontrar el otro equipo (`equipos`).
 //! El ícono de la barra de menús o de la bandeja y sus accesos rápidos (`bandeja`).
 //! Los widgets de brillo de una sola pantalla (`widget_brillo`).
@@ -19,6 +20,7 @@ pub mod drop;
 pub mod equipos;
 pub mod escenas;
 pub mod fallos;
+pub mod hogar;
 pub mod instancia;
 pub mod pantalla_virtual;
 pub mod permisos;

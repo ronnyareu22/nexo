@@ -52,6 +52,7 @@
     | 'archivo'
     | 'campana'
     | 'setup'
+    | 'casa'
     | 'analitica'
     | 'cpu'
     | 'memoria'
@@ -247,6 +248,11 @@
     <path d="M12 11.5v3" />
     <path d="M2.5 14.5h19" />
     <path d="M4.5 14.5V20M19.5 14.5V20" />
+  {:else if nombre === 'casa'}
+    <!-- Casa: un sillón (la sala de la casa); Inicio ya es la casita -->
+    <path d="M5 10.5V8a2.5 2.5 0 0 1 2.5-2.5h9A2.5 2.5 0 0 1 19 8v2.5" />
+    <path d="M3.5 12.5a1.75 1.75 0 0 1 3.5 0V14h10v-1.5a1.75 1.75 0 0 1 3.5 0V17a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17z" />
+    <path d="M6 18.5V20M18 18.5V20" />
   {:else if nombre === 'analitica'}
     <!-- Analítica: una línea que sube sobre sus ejes -->
     <path d="M4 4.5V18a1.5 1.5 0 0 0 1.5 1.5H20" />

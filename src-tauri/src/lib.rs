@@ -19,9 +19,10 @@ use tauri_plugin_notification::NotificationExt;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 /// Las secciones del panel (las mismas de `src/routes/+page.svelte`).
-const SECCIONES: [&str; 10] = [
+const SECCIONES: [&str; 11] = [
     "inicio",
     "setup",
+    "casa",
     "dispositivos",
     "audio",
     "pantallas",
@@ -302,6 +303,21 @@ pub fn run() {
             sistema::escenas::guardar_escena,
             sistema::escenas::borrar_escena,
             sistema::escenas::activar_escena,
+            sistema::hogar::hogar_estado,
+            sistema::hogar::hogar_ejecutar,
+            sistema::hogar::hogar_buscar,
+            sistema::hogar::hogar_agregar,
+            sistema::hogar::hogar_quitar,
+            sistema::hogar::hogar_editar,
+            sistema::hogar::hogar_guardar_grupo,
+            sistema::hogar::hogar_borrar_grupo,
+            sistema::hogar::hogar_guardar_habitacion,
+            sistema::hogar::hogar_borrar_habitacion,
+            sistema::hogar::hogar_mostrar_todo,
+            sistema::hogar::hogar_tuya_conectar,
+            sistema::hogar::hogar_tuya_desconectar,
+            sistema::hogar::hogar_ha_conectar,
+            sistema::hogar::hogar_ha_desconectar,
             sistema::actualizar::actualizacion_estado,
             sistema::actualizar::actualizacion_buscar,
             sistema::actualizar::actualizar_instalar,

@@ -1,4 +1,5 @@
 <!-- Deslizador (0–100, o 0–`maximo`): pista hundida, relleno con el color de su familia y perilla blanca.
+     Con `pista`, la pista entera es ese fondo (el blanco cálido a frío o el arco iris de una luz) y no hay relleno.
      Funciona con teclado. -->
 <script lang="ts">
   let {
@@ -8,12 +9,20 @@
     apagado = false,
     tono,
     maximo = 100,
+    minimo = 0,
+    pista,
+    deshabilitado = false,
     oncambio,
     ontocando,
   }: {
     valor: number;
     /** Hasta dónde llega (de fábrica, 100). */
     maximo?: number;
+    /** Desde dónde (de fábrica, 0; el brillo de una luz empieza en 1). */
+    minimo?: number;
+    /** Fondo de la pista entera (un degradado); sin relleno. */
+    pista?: string;
+    deshabilitado?: boolean;
     etiqueta: string;
     /** celeste para sonido, amarillo para brillo, verde para batería y conexión, primario para lo demás */
     color?: 'celeste' | 'amarillo' | 'verde' | 'primario';
@@ -27,13 +36,16 @@
 
 <input
   type="range"
-  min="0"
+  min={minimo}
   max={maximo}
+  disabled={deshabilitado}
   step="1"
   value={valor}
   aria-label={etiqueta}
   class:apagado
-  style:--parte={Math.max(0, Math.min(1, valor / (maximo || 1)))}
+  class:con-pista={!!pista}
+  style:--pista={pista}
+  style:--parte={Math.max(0, Math.min(1, (valor - minimo) / (maximo - minimo || 1)))}
   style:--relleno={tono ?? `var(--${color})`}
   oninput={(e) => oncambio(Number(e.currentTarget.value))}
   onpointerdown={(e) => {
@@ -66,6 +78,14 @@
       linear-gradient(var(--relleno), var(--relleno)) 0 0 / var(--lleno) 100% no-repeat,
       var(--superficie-hundida);
     box-shadow: inset 0 0 0 1px var(--borde);
+  }
+  input.con-pista::-webkit-slider-runnable-track {
+    background: var(--pista);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12);
+  }
+  input:disabled {
+    cursor: default;
+    opacity: 0.45;
   }
   input.apagado::-webkit-slider-runnable-track {
     background:

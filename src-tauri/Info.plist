@@ -4,6 +4,27 @@
 <dict>
   <!-- macOS muestra este texto al pedir permiso de Bluetooth. -->
   <key>NSBluetoothAlwaysUsageDescription</key>
-  <string>Nexo usa Bluetooth para mostrar tus dispositivos, su batería y conectarlos.</string>
+  <string>Nexo usa Bluetooth para mostrar tus dispositivos, su batería y conectarlos, y para encontrar y manejar luces Bluetooth cuando tú lo pides.</string>
+  <!-- Casa: "Buscar aparatos" encuentra luces, teles y Home Assistant en tu red (solo cuando lo pides). -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Nexo busca luces, enchufes, teles y Home Assistant en tu red de casa cuando tocas «Buscar aparatos», y los maneja sin pasar por internet.</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_home-assistant._tcp</string>
+    <string>_hue._tcp</string>
+    <string>_googlecast._tcp</string>
+    <string>_androidtvremote2._tcp</string>
+    <string>_airplay._tcp</string>
+    <string>_hap._tcp</string>
+    <string>_matter._tcp</string>
+    <string>_shelly._tcp</string>
+    <string>_esphomelib._tcp</string>
+  </array>
+  <!-- Home Assistant en la red de casa o por Tailscale suele ir por http://: solo direcciones locales e IP. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
 </dict>
 </plist>
