@@ -41,6 +41,7 @@
   import VistaAudio from '$lib/vistas/Audio.svelte';
   import VistaPantallas from '$lib/vistas/Pantallas.svelte';
   import VistaRemoto from '$lib/vistas/Remoto.svelte';
+  import VistaAnalitica from '$lib/vistas/Analitica.svelte';
   import VistaDrop from '$lib/vistas/Drop.svelte';
   import CapaDrop from '$lib/componentes/CapaDrop.svelte';
   import VistaAutomatizaciones from '$lib/vistas/Automatizaciones.svelte';
@@ -55,6 +56,7 @@
     | 'audio'
     | 'pantallas'
     | 'remoto'
+    | 'analitica'
     | 'drop'
     | 'automatizaciones'
     | 'ajustes';
@@ -70,6 +72,7 @@
     { id: 'audio', nombre: 'Audio', icono: 'audio' },
     { id: 'pantallas', nombre: 'Pantallas', icono: 'pantallas' },
     { id: 'remoto', nombre: 'Remoto', icono: 'remoto' },
+    { id: 'analitica', nombre: 'Analítica', icono: 'analitica' },
     { id: 'drop', nombre: 'XDrop', icono: 'drop' },
     { id: 'automatizaciones', nombre: 'Automatizaciones', icono: 'automatizaciones' },
     { id: 'ajustes', nombre: 'Ajustes', icono: 'engranaje' },
@@ -377,7 +380,9 @@
             {:else if seccion === 'pantallas'}
               <VistaPantallas {pantallas} onerror={mostrarAviso} />
             {:else if seccion === 'remoto'}
-              <VistaRemoto onerror={mostrarAviso} />
+              <VistaRemoto onir={ir} onerror={mostrarAviso} />
+            {:else if seccion === 'analitica'}
+              <VistaAnalitica />
             {:else if seccion === 'drop'}
               <VistaDrop onerror={mostrarAviso} />
             {:else if seccion === 'automatizaciones'}

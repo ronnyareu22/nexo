@@ -269,7 +269,8 @@ pub fn enlace_valido(url: &str) -> Option<String> {
 }
 
 /// El destino elegido, si es un equipo del mismo dueño (o este mismo, para probar): su dirección y su nombre.
-fn destino_valido(destino: &str) -> Result<(Ipv4Addr, String), String> {
+/// También lo usa el mando de la Mac (remoto/mando.rs).
+pub(super) fn destino_valido(destino: &str) -> Result<(Ipv4Addr, String), String> {
     let ip: Ipv4Addr = destino.trim().parse().map_err(|_| "Ese destino no es una dirección de Tailscale.".to_string())?;
     let texto = ip.to_string();
     let mut info = tailscale::leer(Duration::from_secs(30));

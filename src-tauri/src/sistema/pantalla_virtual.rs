@@ -70,8 +70,8 @@ pub struct CambioPantallaVirtual {
     pub crear_al_empezar: Option<bool>,
 }
 
-/// Solo las resoluciones de la lista.
-fn resolucion(ancho: u32, alto: u32) -> Result<(u32, u32), String> {
+/// Solo las resoluciones de la lista. También la usa el mando desde Windows (remoto/mando.rs).
+pub(super) fn resolucion(ancho: u32, alto: u32) -> Result<(u32, u32), String> {
     RESOLUCIONES
         .into_iter()
         .find(|r| *r == (ancho, alto))
@@ -207,6 +207,26 @@ pub fn al_cambiar_sesion(app: &AppHandle, sesion: bool) {
     }
 }
 
+/// Cambia "Crear al empezar una sesión remota" o "Quitar al terminar la sesión remota", lo guarda y avisa.
+/// Lo usan el panel y el mando desde Windows (remoto/mando.rs).
+pub fn ajustar(app: &AppHandle, cambio: CambioPantallaVirtual) -> Result<EstadoPantallaVirtual, String> {
+    if !cfg!(target_os = "macos") {
+        return Err(SOLO_MAC.into());
+    }
+    ajustes::cambiar(app, |a| {
+        let p = &mut a.pantalla_virtual;
+        if let Some(v) = cambio.quitar_al_terminar {
+            p.quitar_al_terminar = v;
+        }
+        if let Some(v) = cambio.crear_al_empezar {
+            p.crear_al_empezar = v;
+        }
+    })?;
+    let e = estado(app);
+    avisar(app, &e);
+    Ok(e)
+}
+
 /// Si una pantalla es la virtual de Nexo (por su fabricante y modelo). Lo usa el hilo de pantallas.
 #[cfg(target_os = "macos")]
 pub fn es_nuestra(id: u32) -> bool {
@@ -236,25 +256,7 @@ pub async fn pantalla_virtual(
 /// Cambia "Crear al empezar una sesión remota" o "Quitar al terminar la sesión remota". Devuelve cómo quedó.
 #[tauri::command]
 pub async fn pantalla_virtual_ajustar(app: AppHandle, cambio: CambioPantallaVirtual) -> Result<EstadoPantallaVirtual, String> {
-    if !cfg!(target_os = "macos") {
-        return Err(SOLO_MAC.into());
-    }
-    tauri::async_runtime::spawn_blocking(move || {
-        ajustes::cambiar(&app, |a| {
-            let p = &mut a.pantalla_virtual;
-            if let Some(v) = cambio.quitar_al_terminar {
-                p.quitar_al_terminar = v;
-            }
-            if let Some(v) = cambio.crear_al_empezar {
-                p.crear_al_empezar = v;
-            }
-        })?;
-        let e = estado(&app);
-        avisar(&app, &e);
-        Ok(e)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || ajustar(&app, cambio)).await.map_err(|e| e.to_string())?
 }
 
 // ---------------------------------------------------------------- Mac: CGVirtualDisplay

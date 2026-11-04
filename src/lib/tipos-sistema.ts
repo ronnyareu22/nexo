@@ -108,6 +108,26 @@ export interface CambioPantallaVirtual {
   crearAlEmpezar?: boolean;
 }
 
+/** `remoto_mac_estado`: la Mac vista desde Windows, por XDrop (sistema/remoto/mando.rs). */
+export interface EstadoMac {
+  /** La Mac en Tailscale ("demo-sige"). */
+  equipo: string;
+  plataforma: PlataformaEquipo;
+  pantallaVirtual: Omit<EstadoPantallaVirtual, 'id'>;
+  /** La sesión de RustDesk que está entrando a la Mac. */
+  sesion: { activa: boolean; directa: boolean; rele: boolean; equipo: string | null };
+  modoTrabajo: boolean;
+  /** "Evitar que la Mac se duerma": sin él, el modo trabajo no la mantiene despierta. */
+  evitarReposo: boolean;
+}
+
+/** Lo que cambia `remoto_mac_ajustar`; lo que no viene, queda igual. */
+export interface CambioMac {
+  crearAlEmpezar?: boolean;
+  quitarAlTerminar?: boolean;
+  modoTrabajo?: boolean;
+}
+
 /** `remoto_estado`: la sesión de RustDesk, Tailscale, los ajustes y la tabla de atajos. */
 export interface EstadoRemoto {
   activa: boolean;

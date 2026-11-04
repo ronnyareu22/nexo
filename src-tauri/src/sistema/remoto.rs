@@ -17,6 +17,9 @@
 // XDrop (sistema/drop) también usa Tailscale, las imágenes, el portapapeles y la captura.
 pub(super) mod tailscale;
 
+// Manejar la Mac desde Nexo en Windows, por el receptor de XDrop: su pantalla virtual y el modo trabajo.
+pub mod mando;
+
 #[cfg(target_os = "macos")]
 pub(super) mod captura;
 #[cfg(target_os = "macos")]
@@ -232,6 +235,14 @@ fn sesion_actual() -> Sesion {
     SESION.lock().map(|s| s.clone()).unwrap_or_default()
 }
 
+/// Para Analítica: la sesión, si está el modo trabajo y si la Mac no se dormirá (caffeinate activo).
+pub fn resumen() -> (Sesion, bool, bool) {
+    let s = sesion_actual();
+    let modo = MODO_TRABAJO.load(Ordering::Relaxed);
+    let sin_reposo = cfg!(target_os = "macos") && EVITAR_REPOSO.load(Ordering::Relaxed) && (s.activa || modo);
+    (s, modo, sin_reposo)
+}
+
 /// Arranque: carga los ajustes y, en la Mac, enciende el vigía de la sesión, la escucha de teclado y el portapapeles.
 pub fn iniciar(app: &AppHandle) {
     poner_banderas(&ajustes::cargar(app).remoto);
@@ -360,35 +371,41 @@ pub async fn remoto_estado(app: AppHandle) -> EstadoRemoto {
     tauri::async_runtime::spawn_blocking(move || estado(&a)).await.unwrap_or_else(|_| estado(&app))
 }
 
+/// Guarda uno o varios ajustes del remoto (y el modo trabajo) y los aplica. Lo usan el panel y el mando (`mando`).
+fn aplicar_cambio(app: &AppHandle, cambio: CambioRemoto) -> Result<(), String> {
+    let nuevos = ajustes::cambiar(app, |a| {
+        let r = &mut a.remoto;
+        if let Some(v) = cambio.traducir {
+            r.traducir = v;
+        }
+        if let Some(v) = cambio.captura {
+            r.captura = v;
+        }
+        if let Some(v) = cambio.evitar_reposo {
+            r.evitar_reposo = v;
+        }
+        if let Some(v) = cambio.brillo_minimo {
+            r.brillo_minimo = v;
+        }
+        if let Some(v) = cambio.portapapeles_liviano {
+            r.portapapeles_liviano = v;
+        }
+    })?
+    .remoto;
+    poner_banderas(&nuevos);
+    if let Some(v) = cambio.modo_trabajo {
+        MODO_TRABAJO.store(v, Ordering::Relaxed);
+    }
+    #[cfg(target_os = "macos")]
+    mac::aplicar(app, cambio.brillo_minimo.is_some());
+    Ok(())
+}
+
 /// Cambia uno o varios ajustes del remoto (y el modo trabajo). Devuelve cómo quedó todo.
 #[tauri::command]
 pub async fn remoto_ajustar(app: AppHandle, cambio: CambioRemoto) -> Result<EstadoRemoto, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let nuevos = ajustes::cambiar(&app, |a| {
-            let r = &mut a.remoto;
-            if let Some(v) = cambio.traducir {
-                r.traducir = v;
-            }
-            if let Some(v) = cambio.captura {
-                r.captura = v;
-            }
-            if let Some(v) = cambio.evitar_reposo {
-                r.evitar_reposo = v;
-            }
-            if let Some(v) = cambio.brillo_minimo {
-                r.brillo_minimo = v;
-            }
-            if let Some(v) = cambio.portapapeles_liviano {
-                r.portapapeles_liviano = v;
-            }
-        })?
-        .remoto;
-        poner_banderas(&nuevos);
-        if let Some(v) = cambio.modo_trabajo {
-            MODO_TRABAJO.store(v, Ordering::Relaxed);
-        }
-        #[cfg(target_os = "macos")]
-        mac::aplicar(&app, cambio.brillo_minimo.is_some());
+        aplicar_cambio(&app, cambio)?;
         Ok(estado(&app))
     })
     .await

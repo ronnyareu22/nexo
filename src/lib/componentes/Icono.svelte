@@ -52,6 +52,12 @@
     | 'archivo'
     | 'campana'
     | 'setup'
+    | 'analitica'
+    | 'cpu'
+    | 'memoria'
+    | 'termometro'
+    | 'disco'
+    | 'red'
     | 'bombilla'
     | 'camara'
     | 'chevron-arriba';
@@ -240,6 +246,30 @@
     <path d="M12 11.5v3" />
     <path d="M2.5 14.5h19" />
     <path d="M4.5 14.5V20M19.5 14.5V20" />
+  {:else if nombre === 'analitica'}
+    <!-- Analítica: una línea que sube sobre sus ejes -->
+    <path d="M4 4.5V18a1.5 1.5 0 0 0 1.5 1.5H20" />
+    <path d="M7.5 14.5l3.5-4 3 3 5-6" />
+  {:else if nombre === 'cpu'}
+    <rect x="6.5" y="6.5" width="11" height="11" rx="2" />
+    <rect x="9.75" y="9.75" width="4.5" height="4.5" rx="0.8" />
+    <path d="M9.5 3v3.5M14.5 3v3.5M9.5 17.5V21M14.5 17.5V21M3 9.5h3.5M3 14.5h3.5M17.5 9.5H21M17.5 14.5H21" />
+  {:else if nombre === 'memoria'}
+    <!-- Un módulo de memoria con sus patitas -->
+    <rect x="2.5" y="6.5" width="19" height="9.5" rx="1.8" />
+    <path d="M7 9.5v3.5M12 9.5v3.5M17 9.5v3.5" />
+    <path d="M5.5 16v2.5M9 16v2.5M15 16v2.5M18.5 16v2.5" />
+  {:else if nombre === 'termometro'}
+    <path d="M10 13.8V5.5a2 2 0 0 1 4 0v8.3a4 4 0 1 1-4 0z" />
+    <path d="M12 9.5v6.5" />
+  {:else if nombre === 'disco'}
+    <rect x="2.5" y="6.5" width="19" height="11" rx="2.5" />
+    <path d="M2.5 12h19" />
+    <path d="M17.5 14.75h.01" />
+  {:else if nombre === 'red'}
+    <!-- Bajada y subida -->
+    <path d="M8 19.5V5M4.5 8.5L8 5l3.5 3.5" />
+    <path d="M16 4.5V19M12.5 15.5L16 19l3.5-3.5" />
   {:else if nombre === 'bombilla'}
     <path d="M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1v.6h5v-.6c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z" />
     <path d="M9.5 19h5M10.5 21.5h3" />

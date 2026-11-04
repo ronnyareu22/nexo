@@ -405,12 +405,31 @@ fn atender(app: &AppHandle, mut s: TcpStream) {
                 let _ = responder(&mut s, 200, &crate::sistema::setup::aparatos_json(app));
                 Ok(())
             }
+            // Analítica: el estado de este equipo (ver sistema/analitica.rs).
+            ("GET", "/nexo/analitica") => {
+                let _ = responder(&mut s, 200, &crate::sistema::analitica::json_remoto(app));
+                Ok(())
+            }
             // Actualizaciones para Windows (ver sistema/actualizar.rs).
             ("GET", "/nexo/actualizacion") => {
                 crate::sistema::actualizar::servir_info(app, &mut s, &p.consulta).map_err(|(c, m)| Fallo(c, m))
             }
             ("GET", "/nexo/actualizacion/archivo") => {
                 crate::sistema::actualizar::servir_archivo(app, &mut s, &p.consulta).map_err(|(c, m)| Fallo(c, m))
+            }
+            // Remoto: Nexo en Windows ve y maneja la pantalla virtual y el modo trabajo de la Mac (sistema/remoto/mando.rs).
+            ("GET", "/nexo/remoto/estado") => {
+                let _ = responder(&mut s, 200, &crate::sistema::remoto::mando::estado_json(app));
+                Ok(())
+            }
+            ("POST", ruta @ ("/nexo/remoto/pantalla-virtual" | "/nexo/remoto/ajustar")) => {
+                let cuerpo = leer_cuerpo(&mut s, &p, resto, MAX_ENLACE)?;
+                let v = crate::sistema::remoto::mando::atender(app, ruta, &cuerpo).map_err(|(c, m)| Fallo(c, m))?;
+                let _ = responder(&mut s, 200, &v);
+                Ok(())
+            }
+            (_, "/nexo/remoto/estado" | "/nexo/remoto/pantalla-virtual" | "/nexo/remoto/ajustar") => {
+                Err(fallo(405, "Método no permitido."))
             }
             (
                 _,

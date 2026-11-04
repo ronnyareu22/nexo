@@ -273,8 +273,8 @@ fn limpiar_aparatos(a: Aparatos) -> Aparatos {
     }
 }
 
-/// Separa una respuesta HTTP en su código y su cuerpo.
-fn separar_respuesta(datos: &[u8]) -> Option<(u16, &[u8])> {
+/// Separa una respuesta HTTP en su código y su cuerpo. También la usa el mando de la Mac (remoto/mando.rs).
+pub(super) fn separar_respuesta(datos: &[u8]) -> Option<(u16, &[u8])> {
     let fin = datos.windows(4).position(|v| v == b"\r\n\r\n")?;
     let cabeza = std::str::from_utf8(&datos[..fin]).ok()?;
     let codigo = cabeza.lines().next()?.split(' ').nth(1)?.parse().ok()?;

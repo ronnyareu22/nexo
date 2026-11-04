@@ -64,7 +64,8 @@ src-tauri/src/
 | Brillo mínimo por monitor externo (10 % de fábrica, 0–40 %): el 0 % de Nexo nunca baja de ahí, así no parpadea | ⚠️ ddc-macos, sin probar con el aparato | ⚠️ dxva2, compilado con cargo-xwin, sin probar con el Steren |
 | Ajustes del monitor por DDC/CI (contraste, modo de color, luz cálida, rojo/verde/azul, nitidez, modo de imagen, entrada, volumen, silencio, valores de fábrica), solo lo que el monitor dice que tiene | ⚠️ capacidades con el crate `ddc`, sin probar | ⚠️ `CapabilitiesRequestAndCapabilitiesReply`, sin probar |
 | Widget de brillo de una sola pantalla (`brillo-<id>`), desde la tarjeta de la pantalla o el submenú Brillo del ícono | ⚠️ escrito, sin probar | ⚠️ escrito y compilado con cargo-xwin, sin probar |
-| Pantalla virtual para RustDesk (segunda pantalla de la Mac, en otra ventana de RustDesk): Remoto, menú del ícono y Pantallas | ⚠️ CGVirtualDisplay comprobado con un script en macOS 26.6 (crear, cambiar de resolución, quitar); en la app, sin probar | ❌ no existe (solo la guía de RustDesk en Remoto) |
+| Pantalla virtual para RustDesk (segunda pantalla de la Mac, en otra ventana de RustDesk): Remoto, menú del ícono y Pantallas | ⚠️ CGVirtualDisplay comprobado con un script en macOS 26.6 (crear, cambiar de resolución, quitar); en la app, sin probar | ⚠️ la de la Mac, desde "Tu Mac" en Remoto (por XDrop): escrito y compilado con cargo-xwin, sin probar entre los dos equipos |
+| Analítica: CPU, memoria, temperatura, batería, disco, red, apps que más gastan y sesión remota, de este equipo o del otro (`GET /nexo/analitica` por XDrop) | ⚠️ mach, sysctl, IOKit, NSProcessInfo, getifaddrs y libproc; escrito y compilado, sin probar en la app | ⚠️ kernel32 (sin temperatura ni red); escrito y compilado con cargo-xwin, sin probar |
 
 **Medidas actuales:** la app pesa 4,5 MB y el proceso principal usa unos 27 MB. Con el panel abierto se suman unos 70 MB del motor web, que se liberan al cerrar el panel.
 
@@ -237,8 +238,20 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
      - Se crea con las clases privadas `CGVirtualDisplay…` de CoreGraphics (como DeskPad), en el hilo principal. Vive mientras Nexo guarda el objeto; si Nexo se cierra, macOS la quita.
      - Resoluciones fijas a 60 Hz y sin HiDPI: 1920 × 1080 (de fábrica), 1600 × 900, 2560 × 1440 y 1440 × 900. Se cambia en vivo con `applySettings:`; si no se acepta, se crea de nuevo.
      - `ajustes.json › pantallaVirtual` (`activa`, `ancho`, `alto`, `crearAlEmpezar`, `quitarAlTerminar`): vuelve al abrir Nexo si estaba activa; las dos opciones de la sesión vienen apagadas.
-     - En Remoto, su tarjeta con el interruptor, la resolución, las dos opciones y "Cómo verla en la oficina" (los pasos de RustDesk; en Windows, solo los pasos). Casilla "Pantalla virtual para RustDesk" en el menú del ícono.
+     - En Remoto, su tarjeta con el interruptor, la resolución, las dos opciones y "Cómo verla en la oficina" (los pasos de RustDesk). Casilla "Pantalla virtual para RustDesk" en el menú del ícono.
      - Fuera de la app viene encendida; `?virtual=no` la muestra apagada y `?virtual=nodisponible` sin poder crearla.
+   - **Tu Mac** (Windows, 4 nov; `sistema/remoto/mando.rs`, `lib/api-remoto-mac.ts`): desde el PC se ve y se maneja la Mac sin entrar a RustDesk. La Mac se elige sola entre los destinos de XDrop (`plataforma` mac).
+     - Por el receptor de XDrop, con su misma seguridad: `GET /nexo/remoto/estado`, `POST /nexo/remoto/pantalla-virtual` `{activar, ancho?, alto?}` (solo las 4 resoluciones) y `POST /nexo/remoto/ajustar` `{crearAlEmpezar?, quitarAlTerminar?, modoTrabajo?}`. Usan las mismas funciones que el panel de la Mac.
+     - Comandos `remoto_mac_estado`, `remoto_mac_pantalla_virtual` y `remoto_mac_ajustar`: 3 s para conectar y para responder (12 s al encender la pantalla virtual) y errores en palabras ("Tu Mac no responde: revisa que Nexo esté abierto allá").
+     - La tarjeta: en línea o no, la pantalla virtual con su resolución, "Crear al empezar" y "Quitar al terminar", la sesión, el modo trabajo y "Ver el estado de la Mac" (lleva a `analitica`). Se relee cada 10 s mientras se ve.
+     - Fuera de la app: `?plataforma=windows` muestra la interfaz de Windows; `&mac=apagada`, `sin`, `vieja` o `libre` cambian la Mac de ejemplo.
+   - **Orden de la página** (rehecho el 4 nov: "sale montado todo"): estado · Tu Mac (Windows) o pantalla virtual (Mac) · atajos · captura, durante la sesión y portapapeles en dos columnas. Consultas de contenedor: una columna bajo 760 px y dos por encima; los atajos van en dos mitades desde 1000 px y, bajo 560 px, la acción arriba y las teclas debajo. Sin alturas fijas.
+5b. **Analítica** (4 nov; pedido del dueño: "modo analítica para ver el estado de la Mac", sobre todo desde el PC de la oficina). `vistas/Analitica.svelte`, `sistema/analitica.rs` (+ `analitica/mac.rs` y `win.rs`).
+   - Arriba, el selector del equipo ("Esta PC" / "Mi Mac · demo-sige"); de entrada, el otro equipo si responde. Debajo, si está en línea y a qué hora se actualizó.
+   - Seis tarjetas: CPU, memoria (con la presión) y red (bajada, subida y lo que pasa por Tailscale) con su tendencia de 5 minutos (`Tendencia.svelte`, SVG a mano, con lectura al pasar el mouse); temperatura en palabras (Normal, Tibia, Caliente, Muy caliente; el estado térmico de macOS y los grados de la batería), batería (ciclos y capacidad) y disco.
+   - Las apps que más gastan (CPU y memoria, agrupadas por app; en la Mac solo las del usuario), la sesión remota (RustDesk, pantalla virtual, XDrop, "La Mac no se dormirá", modo trabajo) y el tiempo encendida.
+   - Solo se mide mientras alguien mira: un hilo toma una muestra cada 2 s mientras el panel la pide (6 s por pedido) o el otro equipo (15 s por pedido), y se apaga solo.
+   - Si el otro equipo no responde: "demo-sige no responde · ¿Nexo está abierto en la Mac?" y lo último que se vio, tenue. Fuera de la app: `?seccion=analitica`, con `&analitica=mac`, `apagada` o `sin`.
 6. **XDrop** (antes Nexo Drop; escrito el 3 nov y renombrado el mismo día): pasar archivos, carpetas, textos, enlaces y capturas entre la Mac y el PC por Tailscale. El id de la sección sigue siendo `drop`.
    - **Receptor** (`sistema/drop/servidor.rs`): escucha solo en la dirección de Tailscale del equipo, puerto 47821, y solo atiende a equipos del mismo dueño en Tailscale (y al mismo equipo, para probar). Lo recibido queda en Descargas › XDrop (`drop::CARPETA`, igual en los dos sistemas); el texto va al portapapeles y los enlaces se abren en el navegador. Las notificaciones llevan el título "XDrop".
    - **Envío** (`sistema/drop/envio.rs`): un lote a la vez, con avance, velocidad, tiempo restante y Cancelar. Se suelta sobre cualquier parte de la ventana (o sobre el widget) y lleva a XDrop.
@@ -271,7 +284,7 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
 | Resolución y frecuencia | ✅ CGDisplayMode | ✅ ChangeDisplaySettingsEx | Menús con los modos reales |
 | Pantalla principal y posición | ✅ CGConfigureDisplayOrigin | ✅ | Distribución arrastrable |
 | Rotación | ⚠️ privada | ✅ | Solo donde funcione |
-| Pantalla virtual (segunda pantalla para RustDesk) | ⚠️ privada (`CGVirtualDisplay`), comprobada en macOS 26.6 | ❌ | Mac: interruptor y resoluciones fijas · Windows: solo cómo verla en RustDesk |
+| Pantalla virtual (segunda pantalla para RustDesk) | ⚠️ privada (`CGVirtualDisplay`), comprobada en macOS 26.6 | ❌ | Mac: interruptor y resoluciones fijas · Windows: maneja la de la Mac por XDrop y cómo verla en RustDesk |
 | Atajos del sistema (Mission Control, escritorios, capturas) | ✅ `com.apple.symbolichotkeys` y aplicar sin cerrar sesión | ❌ son fijos | Mac: editables · Windows: de referencia |
 | Reasignar teclas | ✅ `hidutil` (UserKeyMapping, por teclado) | ⚠️ con Nexo abierto (gancho de teclado) o permanente con permiso de administrador | Explicar el alcance en pantalla |
 | Velocidad del cursor y del desplazamiento | ⚠️ preferencias del sistema; pueden pedir volver a abrir apps | ✅ SystemParametersInfo | Solo si se aplica de verdad |
@@ -357,7 +370,7 @@ El dueño los quiere **en los dos sistemas**. Hay tres niveles, que se hacen en 
 ## 13. Rendimiento y cuidado de la máquina
 
 - **Presupuestos:** menos de 5 MB de app, ~30 MB en segundo plano y menos de 100 MB con el panel abierto. Al cerrar el panel se destruye su ventana.
-- **Sondeos:** el vigía de Bluetooth cada 20 s; el brillo 4 veces por segundo solo con el panel a la vista; el sonido cada 2 s solo en el detalle; cada widget de brillo lee la caché (sin tocar el monitor) cada 2 s mientras se ve. Los ajustes del monitor por DDC/CI se leen solo al abrir su sección.
+- **Sondeos:** el vigía de Bluetooth cada 20 s; el brillo 4 veces por segundo solo con el panel a la vista; el sonido cada 2 s solo en el detalle; cada widget de brillo lee la caché (sin tocar el monitor) cada 2 s mientras se ve. Los ajustes del monitor por DDC/CI se leen solo al abrir su sección. Analítica mide cada 2 s solo mientras alguien la mira (aquí o desde el otro equipo) y se apaga sola a los 6 o 15 s.
 - **Sin bucles de animación y sin desenfoques** (también ahorra GPU y batería).
 - **Al desarrollar:** compilar con 6 núcleos (`.cargo/config.toml`). Revisar el diseño con `pnpm build && pnpm preview` y **un solo** Chrome sin ventana, a escala 1, que se cierra enseguida. Apagar los servidores por su PID.
 

@@ -30,11 +30,19 @@ const enApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 const agente = typeof navigator !== 'undefined' ? navigator.userAgent : '';
 
+// Solo fuera de la app, para revisar el diseño: `?plataforma=windows` (o `mac`) muestra la interfaz de ese sistema.
+const plataformaPrueba =
+  !enApp && typeof location !== 'undefined' ? new URLSearchParams(location.search).get('plataforma') : null;
+
 /** Corre en macOS (los textos y algunas funciones cambian en Windows). */
-export const esMac = /Mac/i.test(agente);
+export const esMac = plataformaPrueba ? plataformaPrueba === 'mac' : /Mac/i.test(agente);
 
 /** El sistema: en Mac el contenido llega hasta arriba (botones de la ventana encima); en Windows hay barra de título. */
-export const plataforma: Plataforma = esMac ? 'mac' : /Windows/i.test(agente) ? 'windows' : 'otro';
+export const plataforma: Plataforma = esMac
+  ? 'mac'
+  : plataformaPrueba === 'windows' || /Windows/i.test(agente)
+    ? 'windows'
+    : 'otro';
 /** Dónde se empareja en cada sistema, para los textos de ayuda. */
 export const ajustesBluetoothTexto = esMac ? 'Ajustes › Bluetooth' : 'Configuración › Bluetooth';
 export const textoAbrirBluetooth = esMac ? 'Abrir Ajustes de Bluetooth' : 'Abrir Configuración de Bluetooth';

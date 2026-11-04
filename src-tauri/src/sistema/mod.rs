@@ -10,6 +10,7 @@
 
 pub mod actualizar;
 pub mod ajustes;
+pub mod analitica;
 pub mod arranque;
 pub mod aviso;
 pub mod bandeja;

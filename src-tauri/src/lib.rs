@@ -19,8 +19,18 @@ use tauri_plugin_notification::NotificationExt;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 /// Las secciones del panel (las mismas de `src/routes/+page.svelte`).
-const SECCIONES: [&str; 9] =
-    ["inicio", "setup", "dispositivos", "audio", "pantallas", "remoto", "drop", "automatizaciones", "ajustes"];
+const SECCIONES: [&str; 10] = [
+    "inicio",
+    "setup",
+    "dispositivos",
+    "audio",
+    "pantallas",
+    "remoto",
+    "analitica",
+    "drop",
+    "automatizaciones",
+    "ajustes",
+];
 
 /// Adónde abrir el panel: una sección y, en Dispositivos, la página de un aparato.
 #[derive(Serialize, Clone, Debug)]
@@ -258,6 +268,12 @@ pub fn run() {
             sistema::pantalla_virtual::pantalla_virtual_estado,
             sistema::pantalla_virtual::pantalla_virtual,
             sistema::pantalla_virtual::pantalla_virtual_ajustar,
+            sistema::remoto::mando::remoto_mac_estado,
+            sistema::remoto::mando::remoto_mac_pantalla_virtual,
+            sistema::remoto::mando::remoto_mac_ajustar,
+            sistema::analitica::analitica_local,
+            sistema::analitica::analitica_remota,
+            sistema::analitica::analitica_equipos,
             sistema::drop::drop_destinos,
             sistema::drop::drop_enviar,
             sistema::drop::drop_cancelar,

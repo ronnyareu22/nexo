@@ -1,14 +1,17 @@
 <!--
-  Remoto: la Mac desde el PC del trabajo, con RustDesk por Tailscale.
-  Arriba, el estado de la sesión con su ilustración (el PC de la oficina, la Mac de la casa y Tailscale al medio:
-  conectada, lista o apagada), las acciones y los servicios en fichas.
-  Debajo, a lo ancho, los atajos de Windows que Nexo traduce en la Mac (con espacio, en dos columnas de filas).
-  Luego, también a lo ancho, la pantalla virtual para RustDesk: en la Mac se enciende, se elige su resolución y qué
-  hacer con la sesión; en los dos equipos, cómo verla en otra ventana de RustDesk (con espacio, lado a lado).
-  Luego, en dos columnas parejas: la captura con Imprimir Pantalla y la comodidad durante la sesión, y el
-  portapapeles liviano con su historial.
+  Remoto: la Mac desde el PC del trabajo, con RustDesk por Tailscale. De arriba abajo:
+  1. El estado de la sesión: la ilustración (el PC de la oficina, la Mac de la casa y Tailscale al medio: conectada,
+     lista o apagada), el estado, las acciones y los servicios en fichas.
+  2. Windows: "Tu Mac", su pantalla virtual, las opciones de la sesión y el modo trabajo, manejados por XDrop
+     (api-remoto-mac.ts), y el enlace al estado de la Mac (sección "analitica"); debajo, cómo ver la pantalla
+     virtual en RustDesk. Mac: la pantalla virtual para RustDesk, con sus ajustes y, al lado, cómo verla.
+  3. Los atajos de Windows que Nexo traduce en la Mac (con espacio, en dos mitades).
+  4. En la Mac, una rejilla de dos columnas: la captura y la comodidad durante la sesión a la izquierda y el
+     portapapeles a la derecha. En Windows queda solo la captura, a lo ancho.
+  Todo se acomoda con consultas de contenedor: una columna bajo unos 760 px y dos por encima. Sin alturas fijas.
   En Windows solo se conecta: la traducción, la captura y el portapapeles los hace Nexo en la Mac.
-  Se relee al llegar "remoto-cambio" y cada 5 s mientras se ve; el historial, al llegar "portapapeles-cambio".
+  Se relee al llegar "remoto-cambio" y cada 5 s mientras se ve; la Mac desde Windows, cada 10 s; el historial,
+  al llegar "portapapeles-cambio".
   Superficies sólidas, el hover solo cambia el color y ningún texto se corta: todo baja de línea.
 -->
 <script lang="ts">
@@ -36,7 +39,9 @@
     AtajoRemoto,
     CambioRemoto,
     CapturaRemota,
+    DestinoDrop,
     EntradaPortapapeles,
+    EstadoMac,
     EstadoRemoto,
   } from '$lib/tipos-sistema';
   import { cuando } from '$lib/tiempo';
@@ -50,6 +55,7 @@
     resolucionDe,
     usarPantallaVirtual,
   } from '$lib/api-pantalla-virtual';
+  import { ajustarMac, buscarMac, leerMac, usarPantallaVirtualMac } from '$lib/api-remoto-mac';
   import type { EstadoPantallaVirtual } from '$lib/tipos-sistema';
   import Icono, { type Nombre } from '$lib/componentes/Icono.svelte';
   import Interruptor from '$lib/componentes/Interruptor.svelte';
@@ -57,7 +63,14 @@
   import Dialogo from '$lib/componentes/Dialogo.svelte';
   import IlustracionEscena from '$lib/componentes/IlustracionEscena.svelte';
 
-  let { onerror }: { onerror: (texto: string) => void } = $props();
+  let {
+    onerror,
+    onir,
+  }: {
+    onerror: (texto: string) => void;
+    /** Lleva a otra sección (la usa "Ver el estado de la Mac"). */
+    onir?: (seccion: string) => void;
+  } = $props();
 
   let remoto = $state<EstadoRemoto | null>(null);
   let historial = $state<EntradaPortapapeles[] | null>(null);
@@ -159,6 +172,82 @@
     ocupadoVirtual = null;
   }
 
+  // --- Tu Mac (solo Windows): su pantalla virtual, la sesión y el modo trabajo, por XDrop ---
+  const NO_RESPONDE = 'Tu Mac no responde: revisa que Nexo esté abierto allá.';
+  // undefined mientras se busca la primera vez; null si no está entre tus equipos de Tailscale.
+  let destinoMac = $state<DestinoDrop | null | undefined>(undefined);
+  let mac = $state<EstadoMac | null>(null);
+  let errorMac = $state<string | null>(null);
+  let buscandoMac = $state(false);
+  type ClaveMac = ClaveVirtual | 'modoTrabajo';
+  let ocupadoMac = $state<ClaveMac | null>(null);
+  let versionMac = 0;
+
+  // La Mac se busca entre los destinos de XDrop la primera vez, si no apareció y cada vez que no respondió.
+  async function leerTuMac() {
+    if (esMac || buscandoMac || ocupadoMac) return;
+    buscandoMac = true;
+    const desde = versionMac;
+    try {
+      let d = destinoMac;
+      if (!d || errorMac) {
+        d = await buscarMac();
+        destinoMac = d;
+      }
+      if (!d) {
+        mac = null;
+        errorMac = null;
+      } else if (!d.enLinea) {
+        if (desde === versionMac) errorMac = NO_RESPONDE;
+      } else {
+        const e = await leerMac(d.ip);
+        if (desde === versionMac) {
+          mac = e;
+          errorMac = null;
+        }
+      }
+    } catch (e) {
+      destinoMac ??= null;
+      if (desde === versionMac) errorMac = String(e);
+    }
+    buscandoMac = false;
+  }
+
+  async function cambiarMac(clave: ClaveMac, hacer: (ip: string) => Promise<EstadoMac>) {
+    const d = destinoMac;
+    if (!d || !mac || ocupadoMac) return;
+    ocupadoMac = clave;
+    versionMac++;
+    try {
+      mac = await hacer(d.ip);
+      errorMac = null;
+    } catch (e) {
+      onerror(String(e));
+    }
+    ocupadoMac = null;
+  }
+
+  function alternarVirtualMac() {
+    const v = mac?.pantallaVirtual;
+    if (v) cambiarMac('activa', (ip) => usarPantallaVirtualMac(ip, !v.activa, v.ancho, v.alto));
+  }
+
+  function resolucionMac(clave: string) {
+    const v = mac?.pantallaVirtual;
+    const r = resolucionDe(clave);
+    if (v && r) cambiarMac('resolucion', (ip) => usarPantallaVirtualMac(ip, v.activa, r.ancho, r.alto));
+  }
+
+  function opcionMac(clave: 'crearAlEmpezar' | 'quitarAlTerminar') {
+    const v = mac?.pantallaVirtual;
+    if (v) cambiarMac(clave, (ip) => ajustarMac(ip, { [clave]: !v[clave] }));
+  }
+
+  function modoTrabajoMac() {
+    const e = mac;
+    if (e) cambiarMac('modoTrabajo', (ip) => ajustarMac(ip, { modoTrabajo: !e.modoTrabajo }));
+  }
+
   // --- Estado de arriba ---
   type Tono = 'ok' | 'aviso' | 'apagado';
 
@@ -198,19 +287,18 @@
     };
   });
 
-  // La línea entre el PC y la Mac: viva (directa), por el relé o sin sesión.
-  const ruta = $derived.by((): { estado: 'viva' | 'rele' | 'apagada'; via: string | null } => {
+  // La línea entre el PC y la Mac: viva (directa), por el relé o sin sesión. Tiñe el fondo del dibujo.
+  const ruta = $derived.by((): 'viva' | 'rele' | 'apagada' => {
     const r = remoto;
-    if (!r || !esMac || !r.activa) return { estado: 'apagada', via: null };
-    if (r.rele) return { estado: 'rele', via: 'Relé' };
-    return { estado: 'viva', via: r.directa ? 'Tailscale' : 'Red' };
+    if (!r || !esMac || !r.activa) return 'apagada';
+    return r.rele ? 'rele' : 'viva';
   });
 
   // La ilustración de arriba: conectada (línea firme y visto), lista (línea punteada) o apagada (sin sesión).
   const escenaRemoto = $derived(
-    ruta.estado === 'viva'
+    ruta === 'viva'
       ? 'remoto-conectado'
-      : ruta.estado === 'rele' || resumen?.tono === 'ok' || remoto?.modoTrabajo
+      : ruta === 'rele' || resumen?.tono === 'ok' || remoto?.modoTrabajo
         ? 'remoto'
         : 'remoto-sin',
   );
@@ -237,6 +325,33 @@
       lista.push({ nombre: 'RustDesk', valor: r.rustdesk ? 'Instalado' : 'No instalado', tono: r.rustdesk ? 'ok' : 'aviso' });
     }
     return lista;
+  });
+
+  // "Tu Mac" (Windows): en línea, sin respuesta, sin encontrar o buscando.
+  const estadoTuMac = $derived.by((): { texto: string; tono: Tono } => {
+    if (destinoMac === undefined) return { texto: 'Buscando tu Mac en Tailscale…', tono: 'apagado' };
+    if (destinoMac === null) return { texto: 'No aparece entre tus equipos de Tailscale', tono: 'aviso' };
+    if (errorMac) return { texto: `${destinoMac.nombre} · Sin respuesta`, tono: 'aviso' };
+    if (!mac) return { texto: `${destinoMac.nombre} · Revisando…`, tono: 'apagado' };
+    return { texto: `${mac.equipo || destinoMac.nombre} · En línea`, tono: 'ok' };
+  });
+
+  const sesionMac = $derived.by((): { titulo: string; detalle: string; tono: Tono } | null => {
+    const s = mac?.sesion;
+    if (!s) return null;
+    if (s.activa && s.rele)
+      return {
+        titulo: 'Conectada por el relé de RustDesk',
+        detalle: 'Va más lento. Para ir directo, conéctate con «Conectar a mi Mac».',
+        tono: 'aviso',
+      };
+    if (s.activa)
+      return {
+        titulo: `Conectada desde ${s.equipo ?? 'tu PC'}`,
+        detalle: s.directa ? 'Directo por Tailscale.' : 'Directo por la red.',
+        tono: 'ok',
+      };
+    return { titulo: 'Nadie conectado ahora', detalle: 'Entra con «Conectar a mi Mac», arriba.', tono: 'apagado' };
   });
 
   let preparando = $state(false);
@@ -431,6 +546,7 @@
     leer();
     leerHistorial();
     leerVirtual();
+    leerTuMac();
     const quitar = [
       alCambiarRemoto(() => {
         leer();
@@ -445,21 +561,28 @@
       }),
       alCambiarPortapapeles(leerHistorial),
     ];
-    // Cada 5 s mientras se ve; al volver a la ventana (por ejemplo, desde Ajustes del Sistema), enseguida.
+    // Cada 5 s mientras se ve (la Mac desde Windows, cada 10 s); al volver a la ventana, enseguida.
     const intervalo = setInterval(() => {
       if (document.visibilityState === 'visible') leer();
     }, 5000);
+    const intervaloMac = esMac
+      ? undefined
+      : setInterval(() => {
+          if (document.visibilityState === 'visible') leerTuMac();
+        }, 10000);
     const alVolver = () => {
       if (document.visibilityState !== 'visible') return;
       leer();
       leerHistorial();
       leerVirtual();
+      leerTuMac();
     };
     document.addEventListener('visibilitychange', alVolver);
     window.addEventListener('focus', alVolver);
     return () => {
       for (const q of quitar) q();
       clearInterval(intervalo);
+      clearInterval(intervaloMac);
       clearTimeout(temporizadorAviso);
       clearTimeout(temporizadorCopia);
       document.removeEventListener('visibilitychange', alVolver);
@@ -478,23 +601,52 @@
   <span class="ficha" class:activa aria-hidden="true"><Icono nombre={icono} tamano={18} /></span>
 {/snippet}
 
+<!-- Cómo ver la segunda pantalla de la Mac en RustDesk. Cada paso va en un <span>: así el texto con negritas fluye
+     junto, en la segunda columna (la primera es el número). `ancha`: con espacio, los pasos y el consejo lado a lado. -->
+{#snippet guiaVirtual(ancha: boolean)}
+  <div class="guia-pasos" class:ancha>
+    <ol class="pasos">
+      <li>
+        <span>
+          En la ventana de la sesión de RustDesk, abre el botón de monitores de la barra de arriba
+          (<b>Seleccionar monitor</b>).
+        </span>
+      </li>
+      <li>
+        <span>
+          Marca <b>Mostrar pantallas como ventanas individuales</b> y toca el <b>2</b>: la segunda pantalla de tu Mac se
+          abre en otra ventana.
+        </span>
+      </li>
+      <li><span>Arrastra esa ventana a tu otro monitor y pulsa <b>Pantalla completa</b> en su barra.</span></li>
+    </ol>
+    <p class="consejo">
+      <Icono nombre="info" tamano={15} />
+      <span>
+        Para que se haga solo: en RustDesk, ve a <b>Ajustes › Pantalla</b> y, en «Otras opciones predeterminadas», marca
+        <b>Usar todas mis pantallas para la sesión remota</b>. Al conectarte, cada pantalla de la Mac se abre a pantalla
+        completa en un monitor. Windows debe estar en <b>Extender</b> (Win + P).
+      </span>
+    </p>
+  </div>
+{/snippet}
+
 <div class="vista">
   <header class="cabecera">
     <h1>Remoto</h1>
     <p>
       {esMac
         ? 'Usa tu Mac desde el PC del trabajo con RustDesk y Tailscale.'
-        : 'Conéctate a tu Mac con RustDesk por Tailscale.'}
+        : 'Conéctate a tu Mac con RustDesk por Tailscale y manéjala desde aquí.'}
     </p>
   </header>
 
   {#if remoto && resumen}
     {@const r = remoto}
-    <!-- Estado de la sesión: la ilustración a la izquierda; el estado, las acciones y los servicios a la derecha -->
+    <!-- 1. Estado de la sesión: la ilustración a la izquierda; el estado, las acciones y los servicios a la derecha -->
     <section class="estado vidrio" aria-labelledby="remoto-estado">
-      <div class="estado__escena {ruta.estado}" aria-hidden="true">
+      <div class="estado__escena {ruta}" aria-hidden="true">
         <IlustracionEscena nombre={escenaRemoto} icono="remoto" />
-        {#if ruta.via}<span class="estado__via">{ruta.via}</span>{/if}
       </div>
 
       <div class="estado__cuerpo">
@@ -549,14 +701,279 @@
         {#if avisoAccion}
           <p class="aviso-accion {avisoAccion.tono}" role="status">
             <Icono nombre={avisoAccion.tono === 'ok' ? 'check-circulo' : 'info'} tamano={16} />
-            {avisoAccion.texto}
+            <span>{avisoAccion.texto}</span>
           </p>
         {/if}
       </div>
     </section>
 
-    <!-- Atajos: a lo ancho; con espacio, las filas van en dos columnas -->
-    <section class="panel vidrio panel-atajos" aria-labelledby="remoto-atajos">
+    {#if !esMac}
+      <!-- 2. Windows: tu Mac, manejada por XDrop. A la izquierda su pantalla virtual; a la derecha la sesión. -->
+      <section class="panel vidrio" aria-labelledby="remoto-mac">
+        <div class="cabeza">
+          {@render ficha('portatil', !!mac && !errorMac)}
+          <div class="textos">
+            <h2 class="titulo-panel" id="remoto-mac">Tu Mac</h2>
+            <p class="ayuda con-punto" role="status">
+              <span class="punto {estadoTuMac.tono}" aria-hidden="true"></span>
+              <span>{estadoTuMac.texto}</span>
+            </p>
+          </div>
+        </div>
+
+        {#if destinoMac === null || errorMac}
+          <div class="permiso">
+            <Icono nombre="alerta" tamano={16} />
+            <p>
+              {destinoMac === null
+                ? 'No encontré tu Mac entre tus equipos de Tailscale. Revisa que esté encendida, con Tailscale conectado y Nexo abierto.'
+                : errorMac}
+            </p>
+            <button
+              class="boton-vidrio boton"
+              type="button"
+              disabled={buscandoMac}
+              aria-busy={buscandoMac}
+              onclick={leerTuMac}
+            >
+              {buscandoMac ? 'Buscando…' : 'Reintentar'}
+            </button>
+          </div>
+        {:else if !mac}
+          <div class="silueta-filas" aria-busy="true"><span class="solo-lector">Revisando tu Mac…</span></div>
+        {:else}
+          {@const v = mac.pantallaVirtual}
+          {@const s = sesionMac}
+          <div class="dos-columnas">
+            <div class="columna-filas">
+              <h3 class="rotulo">Pantalla virtual</h3>
+              <div class="fila">
+                <div class="textos">
+                  <div class="titulo">Pantalla virtual para RustDesk</div>
+                  <div class="ayuda">
+                    {ocupadoMac === 'activa'
+                      ? v.activa
+                        ? 'Quitándola…'
+                        : 'Creándola en tu Mac…'
+                      : v.activa
+                        ? `Activa a ${v.ancho} × ${v.alto}: ábrela como la segunda pantalla en RustDesk.`
+                        : 'Una segunda pantalla de tu Mac, para tu otro monitor.'}
+                  </div>
+                </div>
+                {#if v.disponible}
+                  <Interruptor
+                    encendido={v.activa}
+                    cargando={ocupadoMac === 'activa'}
+                    etiqueta="Pantalla virtual para RustDesk"
+                    oncambio={alternarVirtualMac}
+                  />
+                {/if}
+              </div>
+              {#if !v.disponible}
+                <div class="permiso info">
+                  <Icono nombre="info" tamano={16} />
+                  <p>El macOS de tu Mac no deja crear pantallas virtuales, así que esta opción no está disponible.</p>
+                </div>
+              {:else}
+                <div class="fila con-menu">
+                  <div class="textos">
+                    <div class="titulo">Resolución</div>
+                    <div class="ayuda">
+                      {ocupadoMac === 'resolucion' ? 'Cambiando…' : 'A 60 Hz y sin Retina: pesa poco en la conexión.'}
+                    </div>
+                  </div>
+                  <div class="menu">
+                    <MenuDesplegable
+                      opciones={opcionesResolucionVirtual}
+                      valor={claveResolucion(v.ancho, v.alto)}
+                      etiqueta="Resolución de la pantalla virtual de tu Mac"
+                      oncambio={resolucionMac}
+                    />
+                  </div>
+                </div>
+                <div class="fila">
+                  <div class="textos">
+                    <div class="titulo">Crear al empezar una sesión remota</div>
+                    <div class="ayuda">Aparece sola cuando te conectas desde aquí.</div>
+                  </div>
+                  <Interruptor
+                    encendido={v.crearAlEmpezar}
+                    cargando={ocupadoMac === 'crearAlEmpezar'}
+                    etiqueta="Crear al empezar una sesión remota"
+                    oncambio={() => opcionMac('crearAlEmpezar')}
+                  />
+                </div>
+                <div class="fila">
+                  <div class="textos">
+                    <div class="titulo">Quitar al terminar</div>
+                    <div class="ayuda">Al desconectarte, tu Mac vuelve a tener una sola pantalla.</div>
+                  </div>
+                  <Interruptor
+                    encendido={v.quitarAlTerminar}
+                    cargando={ocupadoMac === 'quitarAlTerminar'}
+                    etiqueta="Quitar al terminar la sesión remota"
+                    oncambio={() => opcionMac('quitarAlTerminar')}
+                  />
+                </div>
+              {/if}
+            </div>
+
+            <div class="columna-filas">
+              <h3 class="rotulo">Sesión</h3>
+              {#if s}
+                <div class="fila">
+                  <div class="textos">
+                    <div class="titulo con-punto">
+                      <span class="punto {s.tono}" aria-hidden="true"></span>
+                      <span>{s.titulo}</span>
+                    </div>
+                    <div class="ayuda">{s.detalle}</div>
+                  </div>
+                </div>
+              {/if}
+              <div class="fila">
+                <div class="textos">
+                  <div class="titulo">Modo trabajo</div>
+                  <div class="ayuda">
+                    {mac.modoTrabajo
+                      ? mac.evitarReposo
+                        ? 'La Mac no se dormirá aunque todavía no te conectes.'
+                        : 'Activo, pero «Evitar que la Mac se duerma» está apagado en la Mac.'
+                      : 'Enciéndelo para que la Mac no se duerma entre una sesión y otra.'}
+                  </div>
+                </div>
+                <Interruptor
+                  encendido={mac.modoTrabajo}
+                  cargando={ocupadoMac === 'modoTrabajo'}
+                  etiqueta="Modo trabajo"
+                  oncambio={modoTrabajoMac}
+                />
+              </div>
+              {#if onir}
+                {@const ir = onir}
+                <div class="fila">
+                  <button class="enlace" type="button" onclick={() => ir('analitica')}>
+                    Ver el estado de la Mac
+                    <Icono nombre="chevron" tamano={15} />
+                  </button>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </section>
+
+      <!-- Windows: cómo ver en RustDesk la pantalla virtual que se enciende en "Tu Mac" (pasos y consejo lado a lado) -->
+      <section class="panel vidrio" aria-labelledby="remoto-virtual">
+        <div class="cabeza">
+          {@render ficha('pantallas', !!mac?.pantallaVirtual.activa)}
+          <div class="textos">
+            <h2 class="titulo-panel" id="remoto-virtual">Ver la pantalla virtual en RustDesk</h2>
+            <p class="ayuda">
+              Con la pantalla virtual de tu Mac encendida, cada pantalla se abre en su propia ventana, una en cada
+              monitor.
+            </p>
+          </div>
+        </div>
+        <div class="guia-virtual">
+          {@render guiaVirtual(true)}
+        </div>
+      </section>
+    {:else}
+      <!-- 2. Mac: la pantalla virtual para RustDesk. A la izquierda sus ajustes; a la derecha, cómo verla. -->
+      <section class="panel vidrio" aria-labelledby="remoto-virtual">
+        <div class="cabeza">
+          {@render ficha('pantallas', !!virtual?.activa)}
+          <div class="textos">
+            <h2 class="titulo-panel" id="remoto-virtual">Pantalla virtual para RustDesk</h2>
+            <p class="ayuda">
+              Agrega una segunda pantalla a tu Mac para verla en otra ventana de RustDesk, en tu otro monitor de la
+              oficina.
+            </p>
+          </div>
+          {#if virtual?.disponible}
+            <Interruptor
+              encendido={virtual.activa}
+              cargando={ocupadoVirtual === 'activa'}
+              etiqueta="Pantalla virtual para RustDesk"
+              oncambio={alternarVirtual}
+            />
+          {/if}
+        </div>
+
+        <div class="dos-columnas">
+          <div class="columna-filas">
+            {#if virtual && !virtual.disponible}
+              <div class="permiso info">
+                <Icono nombre="info" tamano={16} />
+                <p>Este macOS no deja crear pantallas virtuales, así que esta opción no está disponible.</p>
+              </div>
+            {:else if virtual}
+              {@const v = virtual}
+              <div class="fila con-menu">
+                <div class="textos">
+                  <div class="titulo">Resolución</div>
+                  <div class="ayuda">
+                    {ocupadoVirtual === 'resolucion' ? 'Cambiando…' : 'A 60 Hz y sin Retina: pesa poco en la conexión.'}
+                  </div>
+                </div>
+                <div class="menu">
+                  <MenuDesplegable
+                    opciones={opcionesResolucionVirtual}
+                    valor={claveResolucion(v.ancho, v.alto)}
+                    etiqueta="Resolución de la pantalla virtual"
+                    oncambio={resolucionVirtual}
+                  />
+                </div>
+              </div>
+              <div class="fila">
+                <div class="textos">
+                  <div class="titulo">Crear al empezar una sesión remota</div>
+                  <div class="ayuda">Aparece sola cuando te conectas desde el trabajo.</div>
+                </div>
+                <Interruptor
+                  encendido={v.crearAlEmpezar}
+                  cargando={ocupadoVirtual === 'crearAlEmpezar'}
+                  etiqueta="Crear al empezar una sesión remota"
+                  oncambio={() => opcionVirtual('crearAlEmpezar')}
+                />
+              </div>
+              <div class="fila">
+                <div class="textos">
+                  <div class="titulo">Quitar al terminar la sesión remota</div>
+                  <div class="ayuda">Al desconectarte, tu Mac vuelve a tener una sola pantalla.</div>
+                </div>
+                <Interruptor
+                  encendido={v.quitarAlTerminar}
+                  cargando={ocupadoVirtual === 'quitarAlTerminar'}
+                  etiqueta="Quitar al terminar la sesión remota"
+                  oncambio={() => opcionVirtual('quitarAlTerminar')}
+                />
+              </div>
+              {#if v.activa}
+                <p class="resultado" role="status">
+                  <Icono nombre="check-circulo" tamano={16} />
+                  <!-- En una sola expresión: un salto de línea dentro del texto con datos se ve como un espacio angosto. -->
+                  <span>
+                    {`Activa a ${v.ancho} × ${v.alto}. En tu Mac se llama «Nexo · Pantalla virtual»; puedes ordenarla en Ajustes del Sistema › Pantallas.`}
+                  </span>
+                </p>
+              {/if}
+            {:else}
+              <div class="silueta-filas" aria-busy="true"><span class="solo-lector">Revisando la pantalla virtual…</span></div>
+            {/if}
+          </div>
+
+          <div class="guia-virtual">
+            <h3 class="rotulo">Cómo verla en la oficina</h3>
+            {@render guiaVirtual(false)}
+          </div>
+        </div>
+      </section>
+    {/if}
+
+    <!-- 3. Atajos: a lo ancho; con espacio, las filas van en dos mitades -->
+    <section class="panel vidrio" aria-labelledby="remoto-atajos">
       <div class="cabeza">
         {@render ficha('teclado', esMac && r.ajustes.traducir && r.permisoTeclas)}
         <div class="textos">
@@ -603,125 +1020,16 @@
         {/each}
       </div>
       {#if totalAtajos > 9}
-        <button class="mas-atajos" type="button" aria-expanded={todos} onclick={() => (todos = !todos)}>
+        <button class="enlace mas-atajos" type="button" aria-expanded={todos} onclick={() => (todos = !todos)}>
           {todos ? 'Ver menos' : `Ver los ${totalAtajos} atajos`}
           <span class="giro" class:abierto={todos}><Icono nombre="chevron-abajo" tamano={15} /></span>
         </button>
       {/if}
     </section>
 
-    <!-- Pantalla virtual para RustDesk: a la izquierda (Mac) encenderla y sus ajustes; a la derecha, cómo verla -->
-    <section class="panel vidrio" aria-labelledby="remoto-virtual">
-      <div class="cabeza">
-        {@render ficha('pantallas', esMac && !!virtual?.activa)}
-        <div class="textos">
-          <h2 class="titulo-panel" id="remoto-virtual">Pantalla virtual para RustDesk</h2>
-          <p class="ayuda">
-            {esMac
-              ? 'Agrega una segunda pantalla a tu Mac para verla en otra ventana de RustDesk, en tu otro monitor de la oficina.'
-              : 'Si en tu Mac está encendida la pantalla virtual (Nexo › Remoto), puedes ver cada pantalla de la Mac en su propia ventana, una en cada monitor.'}
-          </p>
-        </div>
-        {#if esMac && virtual?.disponible}
-          <Interruptor
-            encendido={virtual.activa}
-            cargando={ocupadoVirtual === 'activa'}
-            etiqueta="Pantalla virtual para RustDesk"
-            oncambio={alternarVirtual}
-          />
-        {/if}
-      </div>
-
-      <div class="virtual" class:dos={esMac}>
-        {#if esMac}
-          <div class="virtual__ajustes">
-            {#if virtual && !virtual.disponible}
-              <div class="permiso info">
-                <Icono nombre="info" tamano={16} />
-                <p>Este macOS no deja crear pantallas virtuales, así que esta opción no está disponible.</p>
-              </div>
-            {:else if virtual}
-              {@const v = virtual}
-              <div class="fila">
-                <div class="textos">
-                  <div class="titulo">Resolución</div>
-                  <div class="ayuda">
-                    {ocupadoVirtual === 'resolucion' ? 'Cambiando…' : 'A 60 Hz y sin Retina: pesa poco en la conexión.'}
-                  </div>
-                </div>
-                <div class="virtual__menu">
-                  <MenuDesplegable
-                    opciones={opcionesResolucionVirtual}
-                    valor={claveResolucion(v.ancho, v.alto)}
-                    etiqueta="Resolución de la pantalla virtual"
-                    oncambio={resolucionVirtual}
-                  />
-                </div>
-              </div>
-              <div class="fila">
-                <div class="textos">
-                  <div class="titulo">Crear al empezar una sesión remota</div>
-                  <div class="ayuda">Aparece sola cuando te conectas desde el trabajo.</div>
-                </div>
-                <Interruptor
-                  encendido={v.crearAlEmpezar}
-                  cargando={ocupadoVirtual === 'crearAlEmpezar'}
-                  etiqueta="Crear al empezar una sesión remota"
-                  oncambio={() => opcionVirtual('crearAlEmpezar')}
-                />
-              </div>
-              <div class="fila">
-                <div class="textos">
-                  <div class="titulo">Quitar al terminar la sesión remota</div>
-                  <div class="ayuda">Al desconectarte, tu Mac vuelve a tener una sola pantalla.</div>
-                </div>
-                <Interruptor
-                  encendido={v.quitarAlTerminar}
-                  cargando={ocupadoVirtual === 'quitarAlTerminar'}
-                  etiqueta="Quitar al terminar la sesión remota"
-                  oncambio={() => opcionVirtual('quitarAlTerminar')}
-                />
-              </div>
-              {#if v.activa}
-                <p class="resultado" role="status">
-                  <Icono nombre="check-circulo" tamano={16} />
-                  Activa a {v.ancho} × {v.alto}. En tu Mac se llama «Nexo · Pantalla virtual»; puedes ordenarla en
-                  Ajustes del Sistema › Pantallas.
-                </p>
-              {/if}
-            {:else}
-              <div class="virtual__silueta" aria-busy="true"><span class="solo-lector">Revisando la pantalla virtual…</span></div>
-            {/if}
-          </div>
-        {/if}
-
-        <div class="virtual__guia">
-          <h3 class="rotulo">Cómo verla en la oficina</h3>
-          <ol class="pasos">
-            <li>
-              En la ventana de la sesión de RustDesk, abre el botón de monitores de la barra de arriba
-              (<b>Seleccionar monitor</b>).
-            </li>
-            <li>
-              Marca <b>Mostrar pantallas como ventanas individuales</b> y toca el <b>2</b>: la segunda pantalla de tu Mac
-              se abre en otra ventana.
-            </li>
-            <li>Arrastra esa ventana a tu otro monitor y pulsa <b>Pantalla completa</b> en su barra.</li>
-          </ol>
-          <p class="consejo">
-            <Icono nombre="info" tamano={15} />
-            <span>
-              Para que se haga solo: en RustDesk, ve a <b>Ajustes › Pantalla</b> y, en «Otras opciones predeterminadas»,
-              marca <b>Usar todas mis pantallas para la sesión remota</b>. Al conectarte, cada pantalla de la Mac se abre a
-              pantalla completa en un monitor. Windows debe estar en <b>Extender</b> (Win + P).
-            </span>
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Los demás paneles en dos columnas parejas: captura y la sesión a la izquierda, el portapapeles a la derecha -->
-    <div class="paneles">
+    <!-- 4. Rejilla: en la Mac, captura y la sesión a la izquierda y el portapapeles a la derecha;
+         en Windows, solo la captura (a lo ancho). -->
+    <div class="rejilla">
       <div class="columna">
         <!-- Captura -->
         <section class="panel vidrio" aria-labelledby="remoto-captura">
@@ -801,14 +1109,18 @@
             {#if ultimaCaptura}
               <p class="resultado" role="status">
                 <Icono nombre="check-circulo" tamano={16} />
-                {ultimaCaptura.copiada ? 'Copiada' : 'Guardada'} · {ultimaCaptura.ancho} × {ultimaCaptura.alto} px ·
-                {miles(ultimaCaptura.kb)} KB
+                <span>
+                  {`${ultimaCaptura.copiada ? 'Copiada' : 'Guardada'} · ${ultimaCaptura.ancho} × ${ultimaCaptura.alto} px · ${miles(ultimaCaptura.kb)} KB`}
+                </span>
               </p>
             {:else if capturaCancelada}
-              <p class="resultado neutro" role="status">Cancelaste la captura. Pulsa Esc cuando quieras salir sin capturar.</p>
+              <p class="resultado neutro" role="status">
+                <span>Cancelaste la captura. Pulsa Esc cuando quieras salir sin capturar.</span>
+              </p>
             {/if}
           {/if}
         </section>
+
         {#if esMac}
           <!-- Comodidad durante la sesión -->
           <section class="panel vidrio" aria-labelledby="remoto-sesion">
@@ -863,6 +1175,7 @@
           </section>
         {/if}
       </div>
+
       {#if esMac}
         <div class="columna">
           <!-- Portapapeles -->
@@ -924,12 +1237,12 @@
                         <p class="copia__texto">Imagen · {e.ancho} × {e.alto} px</p>
                       {:else}
                         <p class="copia__texto" use:tooltip={tooltipDe(e, v.faltan)}>
-                          {v.texto}{#if v.faltan > 0}<span class="faltan"> y {miles(v.faltan)} caracteres más</span>{/if}
+                          {v.texto}{#if v.faltan > 0}<span class="faltan">{` y ${miles(v.faltan)} caracteres más`}</span>{/if}
                         </p>
                       {/if}
                       <p class="copia__meta">
                         <Icono nombre={e.origen === 'remoto' ? 'pantallas' : 'portatil'} tamano={13} />
-                        {e.origen === 'remoto' ? 'Desde el PC' : 'En la Mac'} · {cuando(e.momento)}
+                        <span>{e.origen === 'remoto' ? 'Desde el PC' : 'En la Mac'} · {cuando(e.momento)}</span>
                       </p>
                     </div>
                     <button
@@ -971,12 +1284,16 @@
 />
 
 <style>
+  /* La vista es el contenedor: cada tarjeta se acomoda según el ancho real (no el de la ventana). */
   .vista {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
     min-width: 0;
     container-type: inline-size;
+  }
+  .cabecera {
+    margin-bottom: 4px;
   }
   .cabecera h1 {
     margin: 0;
@@ -990,49 +1307,35 @@
     color: var(--texto-2);
   }
 
-  /* ---------- Estado ---------- */
+  /* ---------- 1. Estado ---------- */
   /* La ilustración a la izquierda, en un escenario apenas teñido; el estado y las acciones a la derecha. */
   .estado {
     display: grid;
-    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
     align-items: center;
     gap: 16px 24px;
     padding: 12px 22px 12px 12px;
     border-radius: var(--radio-lg);
   }
+  /* Mide lo que pide el dibujo (520 × 338) con aire alrededor: nunca se recorta ni queda nada encima. */
   .estado__escena {
-    position: relative;
-    height: 196px;
-    padding: 8px 6px 0;
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    aspect-ratio: 520 / 338;
+    max-height: 230px;
+    padding: 12px 14px;
     border-radius: 16px;
     background: color-mix(in srgb, var(--primario) 6%, var(--superficie-inserto));
-    overflow: hidden;
   }
   .estado__escena.viva {
     background: color-mix(in srgb, var(--exito) 8%, var(--superficie-inserto));
   }
+  .estado__escena.rele {
+    background: color-mix(in srgb, var(--aviso) 7%, var(--superficie-inserto));
+  }
   .estado__escena.apagada {
     background: var(--superficie-inserto);
-  }
-  /* Por dónde va la sesión, al pie del dibujo: verde si es directa, ámbar por el relé. */
-  .estado__via {
-    position: absolute;
-    left: 50%;
-    bottom: 10px;
-    transform: translateX(-50%);
-    padding: 1px 10px;
-    border-radius: var(--radio-pildora);
-    background: var(--superficie);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--exito) 45%, transparent);
-    color: var(--exito);
-    font-size: 11px;
-    line-height: 18px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .rele .estado__via {
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aviso) 45%, transparent);
-    color: var(--aviso);
   }
 
   .estado__cuerpo {
@@ -1144,32 +1447,50 @@
     color: var(--aviso);
   }
 
-  /* Angosto: la ilustración arriba, a lo ancho, y el estado debajo. */
+  /* Angosto: la ilustración arriba, a lo ancho (con su alto tope), y el estado debajo. */
   @container (max-width: 640px) {
     .estado {
       grid-template-columns: minmax(0, 1fr);
-      padding: 12px 12px 14px;
+      padding: 12px 12px 16px;
     }
     .estado__escena {
-      height: 172px;
+      max-height: 200px;
     }
     .estado__cuerpo {
       padding: 0 8px;
     }
   }
 
-  /* ---------- Paneles de abajo ---------- */
-  .paneles,
+  /* ---------- Rejillas ---------- */
+  /* Una columna bajo 760 px de contenedor; dos parejas por encima. */
+  .dos-columnas {
+    display: grid;
+    gap: 8px 32px;
+    min-width: 0;
+  }
+  .rejilla,
   .columna {
     display: grid;
     gap: 16px;
     align-content: start;
     min-width: 0;
   }
-  /* Con espacio, dos columnas parejas (si hay portapapeles: en Windows queda solo la captura). */
-  @container (min-width: 900px) {
-    .paneles:has(> .columna + .columna) {
+  /* En una columna, el segundo grupo de filas se separa del primero con una línea. */
+  .dos-columnas > .columna-filas + .columna-filas {
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--borde);
+  }
+  @container (min-width: 760px) {
+    .dos-columnas,
+    .rejilla:has(> .columna + .columna) {
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: start;
+    }
+    .dos-columnas > .columna-filas + .columna-filas {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
     }
   }
 
@@ -1210,6 +1531,15 @@
     line-height: 18px;
     color: var(--texto-2);
   }
+  /* Un punto de color delante del texto (el estado de la Mac y de la sesión). */
+  .con-punto {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .con-punto > span:last-child {
+    min-width: 0;
+  }
 
   .ficha {
     display: grid;
@@ -1237,8 +1567,27 @@
     padding: 12px 0;
     border-top: 1px solid var(--borde);
   }
-  .rotulo + .fila {
+  .rotulo + .fila,
+  .columna-filas > .fila:first-child {
     border-top: 0;
+  }
+  .columna-filas {
+    min-width: 0;
+  }
+  .columna-filas > .rotulo {
+    margin-bottom: 0;
+  }
+  /* La resolución: si no cabe al lado del texto, el menú baja a su propia línea. */
+  .fila.con-menu {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .con-menu .textos {
+    flex: 1 1 160px;
+  }
+  .menu {
+    flex: 0 1 200px;
+    min-width: 150px;
   }
 
   .boton {
@@ -1274,9 +1623,32 @@
   .boton-texto.peligro {
     color: var(--error);
   }
+  /* Un enlace dentro de una tarjeta ("Ver los 27 atajos", "Ver el estado de la Mac"). */
+  .enlace {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: -8px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--primario-texto);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    transition: background-color var(--dur-color) ease;
+  }
+  .enlace:hover {
+    background: var(--superficie-hover);
+  }
+  .enlace :global(svg) {
+    flex-shrink: 0;
+  }
 
   .permiso {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     margin: 0 0 12px;
@@ -1296,8 +1668,9 @@
   .permiso.info > :global(svg) {
     color: var(--texto-3);
   }
+  /* El texto toma el resto; si el botón no cabe al lado, baja. */
   .permiso p {
-    flex: 1;
+    flex: 1 1 220px;
     min-width: 0;
     margin: 0;
     font-size: 12.5px;
@@ -1353,11 +1726,12 @@
   }
 
   /* Una tabla pareja para todos los grupos: cada fila es [teclas de Windows] → [teclas de la Mac] y la acción
-     justo después. Las columnas miden lo que pide la combinación más larga (subgrid en cada nivel), sin huecos
-     fijos, y quedan alineadas de un grupo a otro. */
+     justo después. Las columnas de teclas son `auto`: miden lo que pide la combinación más larga si hay lugar y,
+     si no, se encogen (las teclas bajan de línea). Así la tabla nunca se sale de la tarjeta. Con subgrid, las
+     columnas quedan alineadas de un grupo a otro. */
   .grupos {
     display: grid;
-    grid-template-columns: max-content 14px max-content minmax(0, 1fr);
+    grid-template-columns: auto 14px auto minmax(0, 1fr);
     column-gap: 10px;
     row-gap: 14px;
     padding: 2px 0 8px;
@@ -1397,18 +1771,19 @@
     border-top: 0;
   }
   .accion {
+    min-width: 0;
     font-size: 13px;
     line-height: 18px;
     color: var(--texto);
     overflow-wrap: break-word;
   }
-  /* Ancho: dos columnas de filas por grupo, con un respiro entre las dos mitades. */
-  @container (min-width: 900px) {
+  /* Muy ancho: dos mitades por grupo, con un respiro al medio (cada acción conserva unos 280 px). */
+  @container (min-width: 1000px) {
     .grupos {
       grid-template-columns:
-        max-content 14px max-content minmax(0, 1fr)
+        auto 14px auto minmax(0, 1fr)
         28px
-        max-content 14px max-content minmax(0, 1fr);
+        auto 14px auto minmax(0, 1fr);
     }
     .atajo:nth-child(odd) {
       grid-column: 1 / 5;
@@ -1420,32 +1795,32 @@
       border-top: 0;
     }
   }
-  /* Muy angosto: la acción baja debajo de las teclas. */
-  @container (max-width: 520px) {
-    .grupos {
-      grid-template-columns: max-content 14px max-content;
+  /* Angosto: la acción arriba, a lo ancho, y las teclas debajo. */
+  @container (max-width: 560px) {
+    .atajo {
+      row-gap: 6px;
+      padding: 8px 0;
     }
     .accion {
+      grid-row: 1;
       grid-column: 1 / -1;
+    }
+    .atajo > .teclas.windows {
+      grid-row: 2;
+      grid-column: 1;
+    }
+    .atajo > .flecha {
+      grid-row: 2;
+      grid-column: 2;
+    }
+    .atajo > .teclas.mac {
+      grid-row: 2;
+      grid-column: 3;
     }
   }
 
   .mas-atajos {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0 0 10px -8px;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--primario-texto);
-    font-size: 13px;
-    font-weight: 600;
-    transition: background-color var(--dur-color) ease;
-  }
-  .mas-atajos:hover {
-    background: var(--superficie-hover);
+    margin-bottom: 10px;
   }
   .giro {
     display: grid;
@@ -1455,46 +1830,21 @@
     transform: rotate(180deg);
   }
 
-  /* ---------- Pantalla virtual ---------- */
-  .virtual {
-    display: grid;
-    gap: 8px 32px;
-    padding-bottom: 8px;
-  }
-  /* Con espacio (en la Mac), los ajustes a la izquierda y la guía a la derecha. */
-  @container (min-width: 900px) {
-    .virtual.dos {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      align-items: start;
-    }
-    .virtual.dos .virtual__guia {
-      margin-top: 0;
-    }
-  }
-  .virtual__ajustes {
-    min-width: 0;
-  }
-  .virtual__ajustes .fila:first-child {
-    border-top: 0;
-    padding-top: 4px;
-  }
-  .virtual__menu {
-    flex-shrink: 0;
-    width: min(220px, 48%);
-  }
-  .virtual__silueta {
+  /* ---------- 2. Pantalla virtual ---------- */
+  .silueta-filas {
     height: 150px;
+    margin-bottom: 12px;
     border-radius: var(--radio-md);
     background: var(--superficie-elevada);
   }
-  .virtual__guia {
+  .guia-virtual {
     min-width: 0;
-    margin-top: 4px;
+    margin-bottom: 12px;
     padding: 14px 16px;
     border-radius: var(--radio-md);
     background: var(--superficie-elevada);
   }
-  .virtual__guia .rotulo {
+  .guia-virtual .rotulo {
     margin: 0 0 10px;
   }
   .pasos {
@@ -1505,9 +1855,11 @@
     list-style: none;
     counter-reset: paso;
   }
+  /* Dos columnas: el número y el texto (el texto va en un solo <span>, con sus negritas adentro). */
   .pasos li {
     display: grid;
     grid-template-columns: 22px minmax(0, 1fr);
+    align-items: start;
     gap: 10px;
     font-size: 13px;
     line-height: 19px;
@@ -1527,6 +1879,10 @@
     font-size: 11.5px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+  }
+  .pasos li > span {
+    min-width: 0;
+    padding-top: 1px;
   }
   .pasos b,
   .consejo b {
@@ -1548,6 +1904,24 @@
     flex-shrink: 0;
     margin-top: 1px;
     color: var(--texto-3);
+  }
+  .consejo > span {
+    min-width: 0;
+  }
+  /* En Windows, con espacio: los pasos a la izquierda y el consejo a la derecha, separados por una línea. */
+  @container (min-width: 760px) {
+    .guia-pasos.ancha {
+      display: grid;
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+      gap: 0 24px;
+      align-items: start;
+    }
+    .guia-pasos.ancha .consejo {
+      margin: 0;
+      padding: 0 0 0 20px;
+      border-top: 0;
+      border-left: 1px solid var(--borde);
+    }
   }
 
   /* ---------- Captura ---------- */
@@ -1585,9 +1959,10 @@
     gap: 10px;
     padding-bottom: 12px;
   }
+  /* El ícono y el texto en un <span>: el texto fluye entero y baja de línea a la par del ícono. */
   .resultado {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     margin: 0 0 12px;
     font-size: 12.5px;
@@ -1595,8 +1970,12 @@
     color: var(--texto-2);
     font-variant-numeric: tabular-nums;
   }
+  .resultado > span {
+    min-width: 0;
+  }
   .resultado :global(svg) {
     flex-shrink: 0;
+    margin-top: 1px;
     color: var(--exito);
   }
 
@@ -1657,17 +2036,18 @@
   }
   .faltan {
     color: var(--texto-3);
-    white-space: normal;
   }
   .copia__meta {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
     gap: 5px;
     margin: 3px 0 0;
     font-size: 12px;
     line-height: 16px;
     color: var(--texto-3);
+  }
+  .copia__meta :global(svg) {
+    flex-shrink: 0;
   }
   .copiar {
     gap: 6px;
