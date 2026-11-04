@@ -4,6 +4,7 @@
   sus bordes y, en una casilla, al mover el mouse con el botón apretado. El ⋯ abre "Abrir Nexo" y "Ocultar widget".
   Datos: los mismos comandos del panel, cada 30 s mientras se ve, al volver a verlo y cuando el vigía avisa un cambio.
   Ningún texto se corta: la ventana mide 568 × 150 y todo baja de línea si no cabe.
+  Nexo Drop: soltar archivos sobre la tarjeta los manda a tu otro equipo (el avance se ve en Nexo › Drop).
 -->
 <script lang="ts">
   import { onMount, tick } from 'svelte';
@@ -12,11 +13,14 @@
   import {
     abrirNexo,
     abrirSeccion,
+    alArrastrarArchivos,
     alCambiarDispositivos,
     alCambiarTema,
+    enviarDrop,
     moverVentana,
     usarWidget,
   } from '$lib/api-sistema';
+  import { destinoActual, drop, leerDestinos } from '$lib/drop.svelte';
   import type { Dispositivo, Estado } from '$lib/tipos';
   import { esDeSonido, nivelPrincipal, nombreDe } from '$lib/tipos';
   import type { PantallaSistema } from '$lib/tipos-sistema';
@@ -239,6 +243,38 @@
     }
   }
 
+  // --- Nexo Drop: soltar archivos sobre el widget ---
+  let soltado = $state<{ texto: string; tono: 'ok' | 'aviso' } | null>(null);
+  let temporizadorSoltado: ReturnType<typeof setTimeout> | undefined;
+  const destinoDrop = $derived(destinoActual());
+
+  function avisoSoltado(texto: string, tono: 'ok' | 'aviso') {
+    soltado = { texto, tono };
+    clearTimeout(temporizadorSoltado);
+    temporizadorSoltado = setTimeout(() => (soltado = null), 4500);
+  }
+
+  async function soltarArchivos(rutas: string[]) {
+    if (!rutas.length) return;
+    await leerDestinos();
+    const d = destinoActual();
+    if (!d) {
+      avisoSoltado('No encontré otro equipo tuyo con Nexo.', 'aviso');
+      return;
+    }
+    try {
+      await enviarDrop(rutas, d.ip);
+      avisoSoltado(`Enviando a ${d.nombre}. Míralo en Nexo › Drop.`, 'ok');
+    } catch (e) {
+      avisoSoltado(String(e), 'aviso');
+    }
+  }
+
+  function verDrop() {
+    soltado = null;
+    abrirSeccion('drop');
+  }
+
   // Un clic fuera del menú lo cierra.
   function alPresionarVentana(e: PointerEvent) {
     if (!menu) return;
@@ -271,6 +307,18 @@
     window.addEventListener('storage', alGuardar);
     const quitarVigia = alCambiarDispositivos(() => actualizar());
     const quitarTema = alCambiarTema(ponerTema);
+    const quitarArrastre = alArrastrarArchivos((a) => {
+      if (a.tipo === 'encima') {
+        drop.arrastrando = true;
+        drop.cantidad = a.rutas.length;
+        leerDestinos();
+      } else if (a.tipo === 'fuera') {
+        drop.arrastrando = false;
+      } else {
+        drop.arrastrando = false;
+        soltarArchivos(a.rutas);
+      }
+    });
 
     return () => {
       clearInterval(intervalo);
@@ -279,6 +327,8 @@
       window.removeEventListener('storage', alGuardar);
       quitarVigia();
       quitarTema();
+      quitarArrastre();
+      clearTimeout(temporizadorSoltado);
     };
   });
 </script>
@@ -368,6 +418,26 @@
         <button type="button" role="menuitem" onclick={() => elegir(() => usarWidget(false))}>Ocultar widget</button>
       </div>
     {/if}
+
+    {#if drop.arrastrando || soltado}
+      <!-- Nexo Drop: tapa la tarjeta mientras se arrastra (y un momento después de soltar). Sólida y quieta. -->
+      <button class="capa-drop" class:aviso={!drop.arrastrando && soltado?.tono === 'aviso'} type="button" onclick={verDrop}>
+        <span class="capa-drop__icono" aria-hidden="true"><Icono nombre="drop" tamano={22} /></span>
+        <span class="capa-drop__texto" role="status">
+          {#if drop.arrastrando}
+            {#if !drop.leidos}
+              Buscando tu otro equipo…
+            {:else if destinoDrop}
+              Suelta para enviar a {destinoDrop.nombre}
+            {:else}
+              No hay a quién enviar: abre Nexo en tu otro equipo
+            {/if}
+          {:else}
+            {soltado?.texto ?? ''}
+          {/if}
+        </span>
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -395,6 +465,46 @@
     box-shadow:
       var(--sombra-panel),
       0 3px 8px -4px rgb(0 0 0 / 0.3);
+  }
+
+  /* Nexo Drop: tapa sólida con el anillo turquesa y la aurora quieta. */
+  .capa-drop {
+    position: absolute;
+    z-index: 5;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border: 0;
+    border-radius: var(--radio-lg);
+    background:
+      radial-gradient(ellipse 200px 90px at 50% 100%, var(--aurora-1), transparent),
+      radial-gradient(ellipse 160px 80px at 25% 100%, var(--aurora-2), transparent),
+      var(--superficie);
+    box-shadow: inset 0 0 0 2px var(--primario);
+    color: var(--texto);
+    text-align: left;
+  }
+  .capa-drop.aviso {
+    box-shadow: inset 0 0 0 2px var(--aviso);
+  }
+  .capa-drop__icono {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+    color: var(--primario-texto);
+    background: var(--elegido-bg);
+  }
+  .capa-drop__texto {
+    font-size: 14px;
+    line-height: 19px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
   }
 
   /* Cuatro casillas; la de Nexo Bot, un poco más ancha para que su frase quepa en dos líneas. */

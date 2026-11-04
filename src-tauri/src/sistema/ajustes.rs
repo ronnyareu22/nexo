@@ -22,6 +22,8 @@ pub struct Ajustes {
     pub bienvenida: bool,
     /// El remoto (RustDesk por Tailscale): traducir atajos, captura, comodidad y portapapeles liviano.
     pub remoto: super::remoto::AjustesRemoto,
+    /// Nexo Drop: recibir archivos y copiar al portapapeles las imágenes que llegan.
+    pub drop: super::drop::AjustesDrop,
 }
 
 impl Default for Ajustes {
@@ -33,6 +35,7 @@ impl Default for Ajustes {
             nombre: None,
             bienvenida: false,
             remoto: super::remoto::AjustesRemoto::default(),
+            drop: super::drop::AjustesDrop::default(),
         }
     }
 }

@@ -23,7 +23,8 @@ use tauri::{
 };
 
 /// Las secciones del panel (las mismas de `src/routes/+page.svelte`).
-const SECCIONES: [&str; 7] = ["inicio", "dispositivos", "audio", "pantallas", "remoto", "automatizaciones", "ajustes"];
+const SECCIONES: [&str; 8] =
+    ["inicio", "dispositivos", "audio", "pantallas", "remoto", "drop", "automatizaciones", "ajustes"];
 
 /// Adónde abrir el panel: una sección y, en Dispositivos, la página de un aparato.
 #[derive(Serialize, Clone, Debug)]
@@ -225,6 +226,21 @@ pub fn run() {
             sistema::remoto::portapapeles_historial,
             sistema::remoto::portapapeles_copiar,
             sistema::remoto::portapapeles_borrar,
+            sistema::drop::drop_destinos,
+            sistema::drop::drop_enviar,
+            sistema::drop::drop_cancelar,
+            sistema::drop::drop_envios,
+            sistema::drop::drop_texto,
+            sistema::drop::drop_enlace,
+            sistema::drop::drop_enviar_portapapeles,
+            sistema::drop::drop_historial,
+            sistema::drop::drop_abrir,
+            sistema::drop::drop_mostrar,
+            sistema::drop::drop_copiar,
+            sistema::drop::drop_borrar_historial,
+            sistema::drop::drop_abrir_carpeta,
+            sistema::drop::drop_ajustes,
+            sistema::drop::drop_ajustar,
             abrir_seccion,
         ])
         .setup(|app| {
@@ -236,6 +252,8 @@ pub fn run() {
             app.manage(pantallas.clone());
             // Remoto (Mac): vigía de la sesión de RustDesk, atajos de Windows, captura con F13 y portapapeles liviano.
             sistema::remoto::iniciar(app.handle());
+            // Nexo Drop: el receptor escucha solo en la dirección de Tailscale (puerto 47821).
+            sistema::drop::iniciar(app.handle());
             if sistema::ajustes::cargar(app.handle()).teclas_brillo && sistema::teclas::permiso_concedido() {
                 let _ = sistema::teclas::activar(pantallas, true);
             }

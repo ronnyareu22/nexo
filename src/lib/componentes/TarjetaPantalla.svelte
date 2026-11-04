@@ -1,4 +1,6 @@
-<!-- Panel de una pantalla: dibujo, nombre, brillo, resolución, frecuencia y "Hacer principal".
+<!-- Panel de una pantalla: a la izquierda la foto sobre un halo que brilla según el nivel; a la derecha el brillo
+     en grande con su barra (el tono va de ámbar tenue a amarillo intenso), − y + y accesos rápidos.
+     Debajo: resolución, frecuencia y "Hacer principal".
      El cambio de modo lo confirma quien la usa (Pantallas.svelte), que vuelve al anterior si no se confirma. -->
 <script lang="ts">
   import { untrack } from 'svelte';
@@ -37,20 +39,64 @@
     onprincipal?: () => void;
   } = $props();
 
-  // --- Brillo: valor propio mientras arrastras; si no, sigue al que llega del sistema (por ejemplo, con las teclas). ---
+  // --- Brillo: valor propio mientras lo cambias; si no, sigue al que llega del sistema (por ejemplo, con las teclas). ---
+  // Después de soltar se espera un momento antes de volver a seguir al sistema: así la barra no rebota con una
+  // lectura vieja. Las diferencias de 1 % (redondeo del sistema) tampoco mueven la barra.
   let tocando = $state(false);
+  let ultimoToque = 0;
   let brillo = $state(untrack(() => p.brillo ?? 0));
   $effect(() => {
     const b = p.brillo;
-    if (!tocando && b !== null) brillo = b;
+    if (b === null || tocando || performance.now() - ultimoToque < 900) return;
+    if (Math.abs(b - untrack(() => brillo)) > 1) brillo = b;
   });
 
   // Siempre el último valor, sin fila: la pantalla sigue al dedo.
   const enviar = enviadorDelUltimo((v: number) => ponerBrillo(p.id, v), (e) => onerror(String(e)));
   function cambiarBrillo(valor: number) {
-    brillo = valor;
-    enviar(valor);
+    ultimoToque = performance.now();
+    brillo = Math.max(0, Math.min(100, Math.round(valor)));
+    enviar(brillo);
   }
+  function alTocar(t: boolean) {
+    tocando = t;
+    ultimoToque = performance.now();
+  }
+  // − y +: al múltiplo de 10 anterior o siguiente (31 → 30 → 20…; 31 → 40).
+  const paso = (subir: boolean) =>
+    cambiarBrillo(subir ? (Math.floor(brillo / 10) + 1) * 10 : Math.floor((brillo - 1) / 10) * 10);
+  const rapidos = [
+    { valor: 5, nombre: 'Mínimo' },
+    { valor: 25, nombre: '25 %' },
+    { valor: 50, nombre: '50 %' },
+    { valor: 75, nombre: '75 %' },
+    { valor: 100, nombre: 'Máximo' },
+  ];
+
+  // El tono del brillo: ámbar tenue abajo, amarillo intenso arriba.
+  const paradas: [number, [number, number, number]][] = [
+    [0, [124, 74, 18]],
+    [40, [217, 119, 6]],
+    [75, [245, 158, 11]],
+    [100, [250, 204, 21]],
+  ];
+  const tono = $derived.by(() => {
+    const b = Math.max(0, Math.min(100, brillo));
+    for (let i = 1; i < paradas.length; i++) {
+      const [b0, c0] = paradas[i - 1];
+      const [b1, c1] = paradas[i];
+      if (b <= b1) {
+        const t = (b - b0) / (b1 - b0);
+        const c = c0.map((v, k) => Math.round(v + (c1[k] - v) * t));
+        return `rgb(${c[0]} ${c[1]} ${c[2]})`;
+      }
+    }
+    return 'rgb(250 204 21)';
+  });
+  const nivel = $derived(
+    brillo <= 15 ? 'Muy tenue' : brillo <= 40 ? 'Tenue' : brillo <= 70 ? 'Medio' : brillo <= 90 ? 'Alto' : 'Al máximo',
+  );
+  const conBrillo = $derived(p.controlable && p.brillo !== null);
 
   // --- Modos: agrupados por tamaño; cada tamaño con sus frecuencias. ---
   interface Tamano {
@@ -96,6 +142,16 @@
     actual ? String(frecuencias.find((m) => hzDe(m) === hzDe(actual))?.id ?? actual.id) : '',
   );
 
+  const resumen = $derived(
+    [
+      p.interna ? 'Pantalla integrada' : 'Monitor externo',
+      actual ? `${actual.ancho} × ${actual.alto}` : '',
+      actual && actual.hz > 0 ? `${numero.format(actual.hz)} Hz` : '',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  );
+
   function elegirResolucion(clave: string) {
     const t = tamanos.find((x) => x.clave === clave);
     if (!t || !onmodo || ocupada) return;
@@ -111,52 +167,74 @@
   }
 </script>
 
-<article class="tarjeta vidrio" aria-label={p.nombre}>
-  <div class="escenario">
-    <div class="figura">
-      {#if fotoDePantalla(p)}
-        <img src={fotoDePantalla(p)} alt="" draggable="false" />
-      {:else}
-        <Ilustracion tipo={p.interna ? 'portatil' : 'monitor'} encendido={p.controlable} />
+<article class="tarjeta vidrio" aria-label={p.nombre} style:--tono={tono} style:--luz={conBrillo ? brillo / 100 : 0.6}>
+  <div class="cabecera">
+    <div class="escenario" aria-hidden="true">
+      <div class="halo"></div>
+      <div class="figura">
+        {#if fotoDePantalla(p)}
+          <img src={fotoDePantalla(p)} alt="" draggable="false" />
+        {:else}
+          <Ilustracion tipo={p.interna ? 'portatil' : 'monitor'} encendido={p.controlable} />
+        {/if}
+      </div>
+    </div>
+
+    <div class="lado">
+      <div class="identidad">
+        <div class="nombre-linea">
+          <h2 class="nombre">{p.nombre}</h2>
+          {#if varias && principal}<span class="chip-principal">Principal</span>{/if}
+        </div>
+        <p class="tipo">{resumen}</p>
+      </div>
+
+      {#if conBrillo}
+        <div class="brillo-panel">
+          <div class="cifra-linea">
+            <span class="cifra">{brillo}<small>%</small></span>
+            <span class="nivel">{nivel}</span>
+          </div>
+          <div class="control">
+            <button class="redondo" type="button" onclick={() => paso(false)} disabled={brillo <= 0} aria-label="Bajar brillo">
+              <Icono nombre="sol-bajo" tamano={18} />
+            </button>
+            <Deslizador
+              valor={brillo}
+              color="amarillo"
+              {tono}
+              etiqueta="Brillo de {p.nombre}"
+              oncambio={cambiarBrillo}
+              ontocando={alTocar}
+            />
+            <button class="redondo" type="button" onclick={() => paso(true)} disabled={brillo >= 100} aria-label="Subir brillo">
+              <Icono nombre="sol" tamano={18} />
+            </button>
+          </div>
+          <div class="rapidos" role="group" aria-label="Brillo rápido">
+            {#each rapidos as r (r.valor)}
+              <button
+                type="button"
+                class="rapido"
+                class:activo={Math.abs(brillo - r.valor) <= 1}
+                onclick={() => cambiarBrillo(r.valor)}>{r.nombre}</button
+              >
+            {/each}
+          </div>
+        </div>
+      {:else if !p.interna}
+        <div class="nota">
+          <span class="nota__icono"><Icono nombre="info" tamano={17} /></span>
+          <p>
+            Este monitor no responde al brillo. Activa <b>DDC/CI</b> en el menú del monitor (con sus botones) y vuelve a
+            abrir Nexo.
+          </p>
+        </div>
       {/if}
     </div>
   </div>
 
-  <div class="identidad">
-    <div class="nombre-linea">
-      <h2 class="nombre">{p.nombre}</h2>
-      {#if varias && principal}<span class="chip-principal">Principal</span>{/if}
-    </div>
-    <p class="tipo">{p.interna ? 'Pantalla integrada' : 'Monitor externo'}</p>
-  </div>
-
   <div class="filas">
-    {#if p.controlable && p.brillo !== null}
-      <div class="fila">
-        <span class="fila__rotulo">Brillo</span>
-        <div class="brillo">
-          <span class="sol"><Icono nombre="sol-bajo" tamano={18} /></span>
-          <Deslizador
-            valor={brillo}
-            color="amarillo"
-            etiqueta="Brillo de {p.nombre}"
-            oncambio={cambiarBrillo}
-            ontocando={(t) => (tocando = t)}
-          />
-          <span class="sol"><Icono nombre="sol" tamano={18} /></span>
-          <span class="valor">{brillo} %</span>
-        </div>
-      </div>
-    {:else if !p.interna}
-      <div class="fila nota">
-        <span class="nota__icono"><Icono nombre="info" tamano={17} /></span>
-        <p>
-          Este monitor no responde al brillo. Activa <b>DDC/CI</b> en el menú del monitor (con sus botones) y vuelve a
-          abrir Nexo.
-        </p>
-      </div>
-    {/if}
-
     {#if tamanos.length > 0}
       <div class="fila">
         <span class="fila__rotulo">Resolución</span>
@@ -206,30 +284,68 @@
 
 <style>
   .tarjeta {
+    container-type: inline-size;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 6px;
     min-width: 0;
-    padding: 16px 20px 6px;
+    padding: 20px 22px 6px;
     border-radius: var(--radio-lg);
   }
 
-  /* El aparato, protagonista, sobre una superficie elevada. */
+  /* Arriba: la foto a la izquierda y el brillo a la derecha; en tarjetas angostas, uno debajo del otro. */
+  .cabecera {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    padding-bottom: 14px;
+  }
+  @container (min-width: 620px) {
+    .cabecera {
+      grid-template-columns: minmax(200px, 300px) minmax(0, 1fr);
+      gap: 28px;
+      align-items: center;
+    }
+  }
+
+  /* El aparato sobre una superficie hundida, con un halo cálido que crece con el brillo. */
   .escenario {
+    position: relative;
+    isolation: isolate;
     display: grid;
     place-items: center;
-    height: 150px;
+    min-height: 190px;
     border-radius: var(--radio-md);
-    background: var(--superficie-elevada);
+    background: var(--superficie-hundida);
+    box-shadow: inset 0 0 0 1px var(--borde);
+    overflow: hidden;
+  }
+  .halo {
+    position: absolute;
+    inset: -20%;
+    z-index: -1;
+    background: radial-gradient(closest-side, var(--tono), transparent 72%);
+    opacity: calc(0.08 + 0.42 * var(--luz));
+    transition: opacity 160ms ease;
   }
   .figura {
-    width: 132px;
-    height: 132px;
+    width: min(200px, 80%);
+    aspect-ratio: 1;
   }
+  /* La foto se apaga o se enciende con el brillo, como la pantalla de verdad. */
   .figura img {
     width: 100%;
     height: 100%;
     object-fit: contain;
+    filter: brightness(calc(0.45 + 0.6 * var(--luz))) drop-shadow(0 10px 18px rgb(0 0 0 / 0.28));
+    transition: filter 160ms ease;
+  }
+
+  .lado {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
   }
 
   .identidad {
@@ -244,9 +360,10 @@
   .nombre {
     margin: 0;
     min-width: 0;
-    font-size: 15px;
-    line-height: 22px;
-    font-weight: 650;
+    font-size: 19px;
+    line-height: 26px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
     overflow-wrap: anywhere;
   }
   .chip-principal {
@@ -303,29 +420,118 @@
     color: var(--texto-2);
   }
 
-  .brillo {
-    flex: 1;
-    max-width: 420px;
-    display: grid;
-    grid-template-columns: 18px 1fr 18px 44px;
+  /* Brillo: la cifra grande con su nivel, la barra con − y +, y los accesos rápidos. */
+  .brillo-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: var(--radio-md);
+    background: var(--superficie-elevada);
+    box-shadow: inset 0 0 0 1px var(--borde);
+  }
+  .cifra-linea {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .cifra {
+    font-size: 40px;
+    line-height: 44px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    color: var(--texto);
+  }
+  .cifra small {
+    margin-left: 2px;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--texto-2);
+  }
+  .nivel {
+    display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--texto-2);
   }
-  .sol {
+  .nivel::before {
+    content: '';
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--tono);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tono) 22%, transparent);
+  }
+  .control {
     display: grid;
-    color: var(--amarillo);
+    grid-template-columns: 36px minmax(0, 1fr) 36px;
+    align-items: center;
+    gap: 12px;
   }
-  .valor {
-    text-align: right;
+  .redondo {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--superficie);
+    box-shadow: inset 0 0 0 1px var(--borde);
+    color: var(--tono);
+    transition: background-color var(--dur-color) ease;
+  }
+  .redondo:hover:not(:disabled) {
+    background: var(--superficie-hover);
+  }
+  .redondo:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+  .redondo:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .rapidos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .rapido {
+    min-height: 30px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radio-pildora);
+    background: var(--superficie);
+    box-shadow: inset 0 0 0 1px var(--borde);
+    color: var(--texto-2);
+    font-size: 12.5px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+    transition:
+      background-color var(--dur-color) ease,
+      color var(--dur-color) ease;
+  }
+  .rapido:hover {
+    background: var(--superficie-hover);
+    color: var(--texto);
+  }
+  .rapido.activo {
+    background: color-mix(in srgb, var(--tono) 18%, var(--superficie));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tono) 45%, transparent);
+    color: var(--texto);
   }
 
   .nota {
-    justify-content: flex-start;
+    display: flex;
     align-items: flex-start;
     gap: 10px;
+    padding: 14px 16px;
+    border-radius: var(--radio-md);
+    background: var(--superficie-elevada);
   }
   .nota__icono {
     display: grid;

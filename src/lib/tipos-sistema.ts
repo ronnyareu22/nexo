@@ -1,5 +1,6 @@
 // Tipos del sistema que manda la parte de Rust para Pantallas y Ajustes (modos de pantalla, permisos, arranque,
-// widget), para la bienvenida y para Remoto (RustDesk por Tailscale, atajos, captura y portapapeles).
+// widget), para la bienvenida, para Remoto (RustDesk por Tailscale, atajos, captura y portapapeles) y para
+// Nexo Drop (archivos, textos y enlaces entre tus equipos).
 // Van con `serde(rename_all = "camelCase")`, igual que tipos.ts.
 import type { Pantalla } from './tipos';
 
@@ -53,7 +54,7 @@ export type Plataforma = 'mac' | 'windows' | 'otro';
 
 /** Adónde abrir el panel: una sección y, en Dispositivos, la página de un aparato (`Destino` en lib.rs). */
 export interface DestinoPanel {
-  seccion: 'inicio' | 'dispositivos' | 'audio' | 'pantallas' | 'remoto' | 'automatizaciones' | 'ajustes';
+  seccion: 'inicio' | 'dispositivos' | 'audio' | 'pantallas' | 'remoto' | 'drop' | 'automatizaciones' | 'ajustes';
   dispositivo?: string | null;
 }
 
@@ -142,3 +143,111 @@ export interface EntradaPortapapeles {
   /** "remoto": llegó desde el PC (estimación). */
   origen: 'mac' | 'remoto';
 }
+
+// --- Nexo Drop (`sistema/drop.rs`) ---
+
+export type PlataformaEquipo = 'mac' | 'windows' | 'otro';
+
+/** Otro equipo tuyo en Tailscale al que se le puede mandar (`drop_destinos`). */
+export interface DestinoDrop {
+  /** Su nombre en Tailscale ("innotech1017"). */
+  nombre: string;
+  /** Su dirección de Tailscale; con ella se manda. */
+  ip: string;
+  plataforma: PlataformaEquipo;
+  /** Nexo respondió en ese equipo. */
+  enLinea: boolean;
+  /** Tailscale lo ve conectado (aunque Nexo no responda). */
+  tailscaleEnLinea: boolean;
+  version: string | null;
+}
+
+/** Ajustes de Nexo Drop, guardados en ajustes.json › drop. Los dos vienen encendidos. */
+export interface AjustesDrop {
+  /** El receptor: apagado, este equipo no escucha en la red. */
+  recibir: boolean;
+  /** Si llega una sola imagen, también queda en el portapapeles. */
+  copiarImagenes: boolean;
+}
+
+export type CambioDrop = Partial<AjustesDrop>;
+
+/** `drop_ajustes`: cómo está Nexo Drop en este equipo. */
+export interface EstadoDrop {
+  ajustes: AjustesDrop;
+  /** La dirección donde escucha ahora; null si no escucha. */
+  escuchando: string | null;
+  /** Este equipo en Tailscale. */
+  nombre: string;
+  plataforma: PlataformaEquipo;
+  /** Dónde queda lo recibido (Descargas › Nexo Drop). */
+  carpeta: string | null;
+  tailscale: EstadoTailscale;
+  puerto: number;
+}
+
+export type EstadoTransferencia = 'esperando' | 'transfiriendo' | 'listo' | 'cancelado' | 'error';
+
+/** Avance de un envío o de algo que llega ("drop-progreso"). */
+export interface ProgresoDrop {
+  lote: string;
+  /** "enviado": sale de aquí; "recibido": llega aquí. */
+  direccion: 'enviado' | 'recibido';
+  /** El otro equipo. */
+  equipo: string;
+  /** El archivo en curso (desde 0) y cuántos son. */
+  indice: number;
+  total: number;
+  /** Ruta relativa del archivo en curso ("Fotos/a.jpg"). */
+  nombre: string;
+  /** Bytes de este archivo. */
+  enviados: number;
+  tamano: number;
+  /** Bytes de todo el envío (al recibir no se sabe el total: 0). */
+  enviadosLote: number;
+  tamanoLote: number;
+  /** Bytes por segundo. */
+  velocidad: number;
+  estado: EstadoTransferencia;
+  error: string | null;
+}
+
+/** Una entrada del historial de Nexo Drop (`drop_historial`). */
+export interface EntradaDrop {
+  id: number;
+  direccion: 'enviado' | 'recibido';
+  tipo: 'archivo' | 'carpeta' | 'varios' | 'texto' | 'enlace';
+  /** El archivo o la carpeta; en "varios", el primero. */
+  nombre: string;
+  /** Cuántos archivos llegaron o salieron, y cuántos tenía el envío. */
+  cantidad: number;
+  total: number;
+  tamano: number;
+  equipo: string;
+  /** Segundos desde 1970. */
+  momento: number;
+  /** Dónde quedó (o de dónde salió). */
+  ruta: string | null;
+  /** El texto o el enlace; null si era un texto oculto (una contraseña). */
+  texto: string | null;
+  estado: 'completo' | 'en curso' | 'cancelado' | 'error';
+  error: string | null;
+  lote: string | null;
+  /** Miniatura de la imagen (data URL). */
+  miniatura: string | null;
+  /** Si el archivo sigue donde quedó. */
+  existe: boolean;
+}
+
+/** `drop_enviar_portapapeles`: qué se mandó. */
+export interface EnvioCopiado {
+  tipo: 'texto' | 'imagen' | 'archivos';
+  lote: string | null;
+  cantidad: number;
+}
+
+/** Archivos arrastrados sobre la ventana de Nexo (con sus rutas reales). */
+export type ArrastreArchivos =
+  | { tipo: 'encima'; rutas: string[] }
+  | { tipo: 'fuera' }
+  | { tipo: 'soltar'; rutas: string[] };

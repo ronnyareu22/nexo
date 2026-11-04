@@ -1,9 +1,11 @@
 //! Integración con el sistema: ajustes guardados, teclas de brillo, aviso en pantalla,
-//! permisos, abrir Nexo al iniciar sesión, el widget de escritorio y el remoto (RustDesk por Tailscale).
+//! permisos, abrir Nexo al iniciar sesión, el widget de escritorio, el remoto (RustDesk por Tailscale)
+//! y Nexo Drop (archivos, textos y enlaces entre los equipos del dueño por Tailscale).
 
 pub mod ajustes;
 pub mod arranque;
 pub mod aviso;
+pub mod drop;
 pub mod permisos;
 pub mod remoto;
 #[cfg(windows)]

@@ -38,11 +38,13 @@
   import VistaAudio from '$lib/vistas/Audio.svelte';
   import VistaPantallas from '$lib/vistas/Pantallas.svelte';
   import VistaRemoto from '$lib/vistas/Remoto.svelte';
+  import VistaDrop from '$lib/vistas/Drop.svelte';
+  import CapaDrop from '$lib/componentes/CapaDrop.svelte';
   import VistaAutomatizaciones from '$lib/vistas/Automatizaciones.svelte';
   import VistaAjustes from '$lib/vistas/Ajustes.svelte';
   import VistaBienvenida from '$lib/vistas/Bienvenida.svelte';
 
-  type Seccion = 'inicio' | 'dispositivos' | 'audio' | 'pantallas' | 'remoto' | 'automatizaciones' | 'ajustes';
+  type Seccion = 'inicio' | 'dispositivos' | 'audio' | 'pantallas' | 'remoto' | 'drop' | 'automatizaciones' | 'ajustes';
 
   // Antes de pintar: en Mac los botones de la ventana van sobre la barra lateral; en Windows no (BarraLateral).
   document.documentElement.dataset.plataforma = plataforma;
@@ -54,6 +56,7 @@
     { id: 'audio', nombre: 'Audio', icono: 'audio' },
     { id: 'pantallas', nombre: 'Pantallas', icono: 'pantallas' },
     { id: 'remoto', nombre: 'Remoto', icono: 'remoto' },
+    { id: 'drop', nombre: 'Drop', icono: 'drop' },
     { id: 'automatizaciones', nombre: 'Automatizaciones', icono: 'automatizaciones' },
     { id: 'ajustes', nombre: 'Ajustes', icono: 'engranaje' },
   ];
@@ -351,6 +354,8 @@
               <VistaPantallas {pantallas} onerror={mostrarAviso} />
             {:else if seccion === 'remoto'}
               <VistaRemoto onerror={mostrarAviso} />
+            {:else if seccion === 'drop'}
+              <VistaDrop onerror={mostrarAviso} />
             {:else if seccion === 'automatizaciones'}
               <VistaAutomatizaciones dispositivos={estado?.dispositivos ?? []} onerror={mostrarAviso} />
             {:else if seccion === 'ajustes'}
@@ -360,6 +365,9 @@
         {/key}
       </main>
     </div>
+
+    <!-- Nexo Drop: arrastrar archivos sobre la ventana los manda al otro equipo y lleva a Drop. -->
+    <CapaDrop visible={seccion !== 'drop'} onenviar={() => ir('drop')} onerror={mostrarAviso} />
 
     {#if aviso}
       <div class="aviso flotante" role="alert" transition:fade={{ duration: dur(160) }}>

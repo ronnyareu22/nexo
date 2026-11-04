@@ -456,3 +456,85 @@ fn base64(datos: &[u8]) -> String {
     }
     s
 }
+
+// ---------------------------------------------------------------- Nexo Drop
+
+/// Nexo Drop: pone un texto en el portapapeles.
+pub fn poner_texto(texto: &str) -> bool {
+    escribir(&[(TEXTO_PLANO, texto.as_bytes())]).is_some()
+}
+
+/// Nexo Drop: pone una imagen PNG. Va sin la marca de "ya reducida": durante una sesión de RustDesk se achica
+/// como cualquier otra copia, para que no se congele.
+pub fn poner_png(png: &[u8]) -> bool {
+    escribir(&[("public.png", png)]).is_some()
+}
+
+/// Lo que hay copiado ahora, para mandarlo con Nexo Drop.
+pub enum Copiado {
+    /// `oculto`: lo marcó un gestor de contraseñas (no se guarda en el historial).
+    Texto { texto: String, oculto: bool },
+    /// Una imagen, ya en PNG.
+    Imagen(Vec<u8>),
+    /// Archivos o carpetas copiados en Finder.
+    Archivos(Vec<PathBuf>),
+}
+
+/// Nexo Drop: lee lo copiado: archivos de Finder, una imagen (en PNG) o texto.
+pub fn leer_copiado() -> Option<Copiado> {
+    let tipos = tipos();
+    if tipos.is_empty() {
+        return None;
+    }
+    let tiene = |t: &str| tipos.iter().any(|x| x == t);
+    if tiene("public.file-url") {
+        let rutas = archivos_copiados();
+        if !rutas.is_empty() {
+            return Some(Copiado::Archivos(rutas));
+        }
+    }
+    // Texto con formato (Word, Pages…) trae también una imagen de la selección, pero es texto.
+    let con_formato = TIPOS_CON_FORMATO.iter().any(|t| tiene(t));
+    if !con_formato {
+        if let Some(tipo) = TIPOS_IMAGEN.iter().find(|t| tiene(t)) {
+            let original = datos(tipo)?;
+            if *tipo == "public.png" {
+                return Some(Copiado::Imagen(original));
+            }
+            let medida = imagen::medir(&original)?;
+            let (png, _, _) = imagen::achicar_png(&original, medida.ancho.max(medida.alto))?;
+            return Some(Copiado::Imagen(png));
+        }
+    }
+    let oculto = tipos.iter().any(|t| TIPOS_SECRETOS.contains(&t.as_str()));
+    texto().filter(|t| !t.is_empty()).map(|texto| Copiado::Texto { texto, oculto })
+}
+
+/// Las rutas de los archivos copiados en Finder (cada elemento trae su `public.file-url`).
+fn archivos_copiados() -> Vec<PathBuf> {
+    con_portapapeles(|pb| {
+        let clase_url = AnyClass::get(c"NSURL")?;
+        let tipo = NSString::from_str("public.file-url");
+        // SAFETY: pasteboardItems devuelve un NSArray de NSPasteboardItem (o nil).
+        let items: Option<Retained<NSArray<AnyObject>>> = unsafe { msg_send![pb, pasteboardItems] };
+        let mut rutas = Vec::new();
+        for item in items?.iter() {
+            // SAFETY: stringForType: devuelve NSString o nil; URLWithString:, filePathURL y path, objetos o nil.
+            // filePathURL convierte también las direcciones de referencia ("file:///.file/id=…").
+            unsafe {
+                let texto: Option<Retained<NSString>> = msg_send![&*item, stringForType: &*tipo];
+                let Some(texto) = texto else { continue };
+                let url: Option<Retained<AnyObject>> = msg_send![clase_url, URLWithString: &*texto];
+                let Some(url) = url else { continue };
+                let archivo: Option<Retained<AnyObject>> = msg_send![&*url, filePathURL];
+                let Some(archivo) = archivo else { continue };
+                let ruta: Option<Retained<NSString>> = msg_send![&*archivo, path];
+                if let Some(r) = ruta {
+                    rutas.push(PathBuf::from(r.to_string()));
+                }
+            }
+        }
+        Some(rutas)
+    })
+    .unwrap_or_default()
+}

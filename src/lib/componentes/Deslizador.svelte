@@ -5,6 +5,7 @@
     etiqueta,
     color = 'celeste',
     apagado = false,
+    tono,
     oncambio,
     ontocando,
   }: {
@@ -15,6 +16,8 @@
     apagado?: boolean;
     oncambio: (v: number) => void;
     ontocando?: (tocando: boolean) => void;
+    /** Color del relleno a mano (por ejemplo, el tono del brillo); si no, el de la familia. */
+    tono?: string;
   } = $props();
 </script>
 
@@ -27,11 +30,16 @@
   aria-label={etiqueta}
   class:apagado
   style:--parte={valor / 100}
-  style:--relleno="var(--{color})"
+  style:--relleno={tono ?? `var(--${color})`}
   oninput={(e) => oncambio(Number(e.currentTarget.value))}
-  onpointerdown={() => ontocando?.(true)}
+  onpointerdown={(e) => {
+    // Captura el puntero: aunque sueltes fuera de la barra, el "soltar" llega igual.
+    e.currentTarget.setPointerCapture(e.pointerId);
+    ontocando?.(true);
+  }}
   onpointerup={() => ontocando?.(false)}
   onpointercancel={() => ontocando?.(false)}
+  onchange={() => ontocando?.(false)}
 />
 
 <style>

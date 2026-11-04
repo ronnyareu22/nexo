@@ -57,6 +57,7 @@ src-tauri/src/
 | Resolución, frecuencia y pantalla principal | ⚠️ lectura comprobada (132 modos); cambiar sin probar, con vuelta atrás a los 15 s | ⏳ |
 | Permisos (Accesibilidad, Bluetooth) y arranque al iniciar sesión | ✅ lectura · ⚠️ activar el arranque sin probar · las notificaciones no informan su estado real | ⏳ |
 | Interfaz nueva: barra lateral, Inicio, Dispositivos, Audio, Pantallas, Automatizaciones, Ajustes | ✅ revisada en claro y oscuro con datos reales | ✅ (misma interfaz) |
+| Nexo Drop: archivos, carpetas, textos y enlaces entre tus equipos por Tailscale (puerto 47821) | ⚠️ escrito, sin probar entre los dos equipos | ⚠️ escrito y compilado con cargo-xwin, sin probar |
 
 **Medidas actuales:** la app pesa 4,5 MB y el proceso principal usa unos 27 MB. Con el panel abierto se suman unos 70 MB del motor web, que se liberan al cerrar el panel.
 
@@ -214,11 +215,17 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - **Portapapeles liviano:** durante la sesión, las imágenes grandes se reducen a 1600 px antes de que RustDesk las mande. Historial de 12 copias, sin contraseñas.
    - **Durante la sesión:** la Mac no se duerme (`caffeinate -s -w`) y el brillo baja al mínimo; al terminar, todo vuelve como estaba.
    - **Permiso nuevo y obligatorio:** Grabación de pantalla.
-6. **Automatizaciones**
+6. **Drop** (Nexo Drop, escrito el 3 nov): pasar archivos, carpetas, textos y enlaces entre la Mac y el PC por Tailscale.
+   - **Receptor** (`sistema/drop/servidor.rs`): escucha solo en la dirección de Tailscale del equipo, puerto 47821, y solo atiende a equipos del mismo dueño en Tailscale (y al mismo equipo, para probar). Lo recibido queda en Descargas › Nexo Drop; el texto va al portapapeles y los enlaces se abren en el navegador.
+   - **Envío** (`sistema/drop/envio.rs`): un lote a la vez, con avance, velocidad, tiempo restante y Cancelar. Se suelta sobre cualquier parte de la ventana (o sobre el widget) y lleva a Drop.
+   - **Acciones rápidas:** "Enviar lo que copiaste" (texto, imagen o archivos copiados), "Abrir un enlace allá" y "Abrir carpeta Nexo Drop".
+   - **Historial** de 40 entradas (`drop.json`), con miniaturas, Abrir, Mostrar y Copiar.
+   - **Ajustes:** "Recibir archivos" y "Copiar imágenes recibidas al portapapeles" (los dos encendidos).
+7. **Automatizaciones**
    - Reglas por aparato: "al conectar, usar para el sonido", "avisar con batería baja", "al conectar el monitor, poner brillo X".
    - Lista de reglas activas.
-7. **Widgets:** ver la sección 10.
-8. **Ajustes**
+8. **Widgets:** ver la sección 10.
+9. **Ajustes**
    - Tema.
    - Arranque al iniciar sesión.
    - Permisos: cuál tiene Nexo, cuál falta y un botón para abrirlo.

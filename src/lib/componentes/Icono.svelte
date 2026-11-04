@@ -45,7 +45,11 @@
     | 'carpeta'
     | 'portapapeles'
     | 'copiar'
-    | 'flecha';
+    | 'flecha'
+    | 'drop'
+    | 'enviado'
+    | 'recibido'
+    | 'archivo';
 </script>
 
 <script lang="ts">
@@ -207,5 +211,19 @@
     <path d="M15.5 8.5V5.7a2.2 2.2 0 0 0-2.2-2.2H5.7a2.2 2.2 0 0 0-2.2 2.2v7.6a2.2 2.2 0 0 0 2.2 2.2h2.8" />
   {:else if nombre === 'flecha'}
     <path d="M4.5 12h15M13.5 6l6 6-6 6" />
+  {:else if nombre === 'drop'}
+    <!-- Una flecha que baja a una bandeja (Nexo Drop) -->
+    <path d="M12 3.5v10.5" />
+    <path d="M7.5 9.8l4.5 4.5 4.5-4.5" />
+    <path d="M3.5 13.5v3.8a2.7 2.7 0 0 0 2.7 2.7h11.6a2.7 2.7 0 0 0 2.7-2.7v-3.8" />
+  {:else if nombre === 'enviado'}
+    <path d="M7 17L17 7" />
+    <path d="M8.5 7H17v8.5" />
+  {:else if nombre === 'recibido'}
+    <path d="M17 7L7 17" />
+    <path d="M15.5 17H7V8.5" />
+  {:else if nombre === 'archivo'}
+    <path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z" />
+    <path d="M14 3.5V8h4.5" />
   {/if}
 </svg>
