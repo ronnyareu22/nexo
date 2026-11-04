@@ -4,11 +4,14 @@
 //!   El teclado de la Mac nunca se toca.
 //! - F13 (a esa tecla lleva RustDesk la de Imprimir pantalla) lanza la captura liviana, venga del teclado que venga.
 //! - Anota cuándo se pulsó copiar, para saber de dónde vino lo copiado (historial del portapapeles).
+//! - Ctrl de RustDesk se guarda un instante: si la tecla que sigue es un atajo (Ctrl+C, Ctrl+V…), Ctrl se manda
+//!   como ⌘. Si no, se manda Ctrl tal cual. Así Chrome, VS Code y las apps Electron, que miran qué
+//!   modificador está abajo en ese momento, ven ⌘V y no ⌃⌘V.
 //! La escucha es rápida y nunca espera: la captura va en su propio hilo.
 
 use std::ffi::c_void;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type Evento = *mut c_void;
@@ -24,6 +27,8 @@ unsafe extern "C" {
     fn CGEventGetFlags(e: Evento) -> u64;
     fn CGEventSetFlags(e: Evento, banderas: u64);
     fn CGEventKeyboardSetUnicodeString(e: Evento, largo: usize, texto: *const u16);
+    fn CGEventCreateCopy(e: Evento) -> Evento;
+    fn CGEventTapPostEvent(proxy: *mut c_void, e: Evento);
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -32,6 +37,7 @@ unsafe extern "C" {
     fn CFRunLoopGetCurrent() -> *mut c_void;
     fn CFRunLoopAddSource(bucle: *mut c_void, fuente: *mut c_void, modo: *const c_void);
     fn CFRunLoopRun();
+    fn CFRelease(objeto: *const c_void);
     static kCFRunLoopCommonModes: *const c_void;
 }
 
@@ -48,6 +54,10 @@ static ULTIMO_PID: AtomicU64 = AtomicU64::new(0);
 static ALT_TAB: AtomicBool = AtomicBool::new(false);
 /// Cuándo se pulsó ⌘C o ⌘X por última vez (ms desde 1970).
 static ULTIMA_COPIA: AtomicU64 = AtomicU64::new(0);
+/// Ctrl de RustDesk guardado hasta ver qué tecla viene (una copia del evento; nulo si no hay).
+static CTRL_GUARDADO: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// Ctrl se mandó como ⌘ (porque vino un atajo): al soltar Ctrl se suelta ⌘.
+static CTRL_COMO_COMANDO: AtomicBool = AtomicBool::new(false);
 
 // Tipos de evento
 const TECLA_ABAJO: u32 = 10;
@@ -94,6 +104,8 @@ const N: u16 = 45;
 const TAB: u16 = 48;
 const BORRAR: u16 = 51;
 const COMANDO_TECLA: u16 = 55;
+const CONTROL_TECLA: u16 = 59;
+const CONTROL_DER_TECLA: u16 = 62;
 const COMANDO_DER_TECLA: u16 = 54;
 const OPCION_TECLA: u16 = 58;
 const OPCION_DER_TECLA: u16 = 61;
@@ -173,7 +185,7 @@ pub fn copia_reciente(ms: u64) -> bool {
     ms_ahora().saturating_sub(ULTIMA_COPIA.load(Ordering::Relaxed)) <= ms
 }
 
-extern "C" fn al_evento(_proxy: *mut c_void, tipo: u32, evento: Evento, _datos: *mut c_void) -> Evento {
+extern "C" fn al_evento(proxy: *mut c_void, tipo: u32, evento: Evento, _datos: *mut c_void) -> Evento {
     // macOS apaga la escucha si tarda o si el usuario la interrumpe: se vuelve a encender.
     if tipo == APAGADA_POR_TIEMPO || tipo == APAGADA_POR_USUARIO {
         if let (Some(t), true) = (TAP.get(), quiere()) {
@@ -196,8 +208,15 @@ extern "C" fn al_evento(_proxy: *mut c_void, tipo: u32, evento: Evento, _datos: 
         return std::ptr::null_mut();
     }
 
+    let traduce = super::TRADUCIR.load(Ordering::Relaxed) && de_rustdesk(evento);
+    if traduce {
+        if let Some(resultado) = control_diferido(proxy, tipo, codigo, banderas, evento) {
+            return resultado;
+        }
+    }
+
     let (mut nuevo_codigo, mut nuevas) = (codigo, banderas);
-    if super::TRADUCIR.load(Ordering::Relaxed) && de_rustdesk(evento) {
+    if traduce {
         if let Some((c, b)) = traducir_evento(tipo, codigo, banderas) {
             nuevo_codigo = c;
             nuevas = b;
@@ -219,6 +238,72 @@ extern "C" fn al_evento(_proxy: *mut c_void, tipo: u32, evento: Evento, _datos: 
         ULTIMA_COPIA.store(ms_ahora(), Ordering::Relaxed);
     }
     evento
+}
+
+/// Suelta la copia guardada de Ctrl. Devuelve si había una.
+fn soltar_ctrl_guardado() -> bool {
+    let viejo = CTRL_GUARDADO.swap(std::ptr::null_mut(), Ordering::SeqCst);
+    if viejo.is_null() {
+        return false;
+    }
+    // SAFETY: la copia la creó CGEventCreateCopy y nadie más la tiene.
+    unsafe { CFRelease(viejo) };
+    true
+}
+
+/// Ctrl de RustDesk, diferido. `Some(evento)` si ya se resolvió aquí (nulo = se descarta); `None` sigue el camino normal.
+fn control_diferido(proxy: *mut c_void, tipo: u32, codigo: u16, b: u64, evento: Evento) -> Option<Evento> {
+    if tipo == MODIFICADORES && matches!(codigo, CONTROL_TECLA | CONTROL_DER_TECLA) {
+        if b & BIT_CONTROL != 0 {
+            // Ctrl abajo: con ⌘ o ⌥ ya abajo, o en una terminal (⌃C interrumpe), pasa tal cual.
+            if b & (BIT_COMANDO | BIT_OPCION) != 0 || es_terminal() {
+                return None;
+            }
+            // SAFETY: evento válido; la copia es nuestra hasta soltarla.
+            let copia = unsafe { CGEventCreateCopy(evento) };
+            if copia.is_null() {
+                return None;
+            }
+            soltar_ctrl_guardado();
+            CTRL_GUARDADO.store(copia, Ordering::SeqCst);
+            return Some(std::ptr::null_mut());
+        }
+        // Ctrl arriba.
+        if CTRL_COMO_COMANDO.swap(false, Ordering::SeqCst) {
+            // Se había mandado como ⌘: se suelta ⌘.
+            unsafe {
+                CGEventSetIntegerValueField(evento, CAMPO_CODIGO, COMANDO_TECLA as i64);
+                CGEventSetFlags(evento, b & !CONTROL & !COMANDO);
+            }
+            return Some(evento);
+        }
+        // Ctrl solo, sin otra tecla en medio: en la Mac no hace nada, se descarta.
+        if soltar_ctrl_guardado() {
+            return Some(std::ptr::null_mut());
+        }
+        return None;
+    }
+    if tipo != TECLA_ABAJO {
+        return None;
+    }
+    let guardado = CTRL_GUARDADO.swap(std::ptr::null_mut(), Ordering::SeqCst);
+    if guardado.is_null() {
+        return None;
+    }
+    // Llegó la tecla que sigue a Ctrl: si con Ctrl es un atajo de ⌘, Ctrl va como ⌘; si no, va Ctrl.
+    let como_comando = traducir(codigo, b, es_terminal).is_some_and(|(_, n)| n & BIT_COMANDO != 0 && n & BIT_CONTROL == 0);
+    // SAFETY: `guardado` es nuestra copia; se manda delante de esta tecla y se suelta.
+    unsafe {
+        if como_comando {
+            CGEventSetIntegerValueField(guardado, CAMPO_CODIGO, COMANDO_TECLA as i64);
+            let f = CGEventGetFlags(guardado);
+            CGEventSetFlags(guardado, (f & !CONTROL) | COMANDO_IZQ);
+            CTRL_COMO_COMANDO.store(true, Ordering::SeqCst);
+        }
+        CGEventTapPostEvent(proxy, guardado);
+        CFRelease(guardado);
+    }
+    None
 }
 
 /// Si la tecla la mandó RustDesk. Se recuerda el último proceso para no preguntar en cada tecla.

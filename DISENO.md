@@ -47,7 +47,7 @@ src-tauri/src/
 | Sonido: volumen, silencio, salida, micrófono | ✅ CoreAudio | ⏳ Core Audio (IAudioEndpointVolume) |
 | Brillo de la pantalla integrada | ✅ DisplayServices (0 ms) | ⏳ WMI / DDC |
 | Brillo de monitores externos (DDC/CI) | ⚠️ ddc-macos | ⏳ ddc-winapi |
-| Teclas de brillo en el monitor bajo el mouse, con aviso propio | ⚠️ CGEventTap + Accesibilidad | — |
+| Teclas de brillo en el monitor bajo el mouse, con aviso propio | ⚠️ CGEventTap + Accesibilidad | ⚠️ Ctrl+Alt+F1 / F2 en el gancho WH_KEYBOARD_LL del remoto |
 | Historial (última vez usado, uso, batería) y automático | ✅ vigía cada 20 s | ⏳ |
 | Notificación de batería baja | ✅ tauri-plugin-notification | ⏳ |
 | Tema claro, oscuro o del sistema (persistente) | ✅ | ✅ (misma interfaz) |

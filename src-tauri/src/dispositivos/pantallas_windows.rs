@@ -26,14 +26,15 @@ use windows::Win32::Devices::Display::{
     PHYSICAL_MONITOR, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig, SetVCPFeature,
 };
 use windows::Win32::Foundation::{
-    ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HANDLE, LPARAM, POINTL, RECT, RPC_E_CHANGED_MODE,
+    ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HANDLE, LPARAM, POINT, POINTL, RECT, RPC_E_CHANGED_MODE,
 };
 use windows::Win32::Graphics::Gdi::{
     CDS_NORESET, CDS_SET_PRIMARY, CDS_TEST, CDS_TYPE, CDS_UPDATEREGISTRY, ChangeDisplaySettingsExW, DEVMODEW,
     DISP_CHANGE, DISP_CHANGE_BADDUALVIEW, DISP_CHANGE_BADMODE, DISP_CHANGE_FAILED, DISP_CHANGE_NOTUPDATED,
     DISP_CHANGE_RESTART, DISP_CHANGE_SUCCESSFUL, DM_BITSPERPEL, DM_DISPLAYFREQUENCY, DM_INTERLACED, DM_PELSHEIGHT,
     DM_PELSWIDTH, DM_POSITION, ENUM_CURRENT_SETTINGS, ENUM_DISPLAY_SETTINGS_FLAGS, ENUM_DISPLAY_SETTINGS_MODE,
-    EnumDisplayMonitors, EnumDisplaySettingsExW, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
+    EnumDisplayMonitors, EnumDisplaySettingsExW, GetMonitorInfoW, HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    MONITORINFOEXW, MonitorFromPoint,
 };
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CoUninitialize,
@@ -45,7 +46,7 @@ use windows::Win32::System::Wmi::{
     WBEM_GENERIC_FLAG_TYPE, WbemLocator,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, MONITORINFOF_PRIMARY};
 use windows::core::{BOOL, BSTR, PCWSTR, w};
 
 const BRILLO_VCP: u8 = 0x10;
@@ -210,6 +211,18 @@ fn monitores() -> Vec<Monitor> {
 
 fn buscar(id: u32) -> Option<Monitor> {
     monitores().into_iter().find(|m| m.id == id)
+}
+
+/// La pantalla que está bajo el mouse (para las teclas de brillo). No toca DDC ni WMI.
+pub fn id_bajo_el_cursor() -> Option<u32> {
+    let mut punto = POINT::default();
+    // Falla con la pantalla bloqueada o en el escritorio seguro: entonces no hay pantalla.
+    unsafe { GetCursorPos(&mut punto) }.ok()?;
+    let h = unsafe { MonitorFromPoint(punto, MONITOR_DEFAULTTONEAREST) };
+    if h.is_invalid() {
+        return None;
+    }
+    monitores().into_iter().find(|m| m.hmonitor == h).map(|m| m.id)
 }
 
 /// Zona útil de una pantalla (sin la barra de tareas), en píxeles físicos, y su escala (1,0 = 96 ppp).

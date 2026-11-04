@@ -8,8 +8,11 @@ use tauri::{AppHandle, Manager};
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Ajustes {
-    /// Las teclas de brillo de la Mac cambian el monitor externo que está bajo el mouse.
+    /// Las teclas de brillo de la Mac (o Ctrl+Alt+F1 / F2 en Windows) cambian la pantalla que está bajo el mouse.
+    /// En Windows viene encendido; en la Mac pide permiso de Accesibilidad, así que ahí viene apagado.
     pub teclas_brillo: bool,
+    /// Windows: ya se encendieron las teclas de brillo la primera vez (ver `primer_inicio`). Después manda la persona.
+    pub teclas_brillo_revisadas: bool,
     /// El widget de escritorio propio (ver `widget`). Viene encendido en Windows; en la Mac están los widgets
     /// nativos (widget-mac/), así que ahí viene apagado.
     pub widget: bool,
@@ -29,7 +32,8 @@ pub struct Ajustes {
 impl Default for Ajustes {
     fn default() -> Self {
         Ajustes {
-            teclas_brillo: false,
+            teclas_brillo: cfg!(windows),
+            teclas_brillo_revisadas: false,
             widget: !cfg!(target_os = "macos"),
             widget_posicion: None,
             nombre: None,
@@ -47,11 +51,13 @@ fn ruta(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_config_dir().ok().map(|d| d.join("ajustes.json"))
 }
 
+/// Los ajustes guardados, solo si se pudieron leer (sin poner los de fábrica en su lugar).
+pub fn leer(app: &AppHandle) -> Option<Ajustes> {
+    ruta(app).and_then(|r| std::fs::read(r).ok()).and_then(|b| serde_json::from_slice(&b).ok())
+}
+
 pub fn cargar(app: &AppHandle) -> Ajustes {
-    ruta(app)
-        .and_then(|r| std::fs::read(r).ok())
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    leer(app).unwrap_or_default()
 }
 
 pub fn guardar(app: &AppHandle, ajustes: &Ajustes) -> Result<(), String> {

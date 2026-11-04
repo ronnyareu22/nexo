@@ -1,5 +1,6 @@
 <!-- Atajo de las teclas de brillo: con el mouse sobre un monitor externo, las teclas de brillo de la Mac cambian ese
      monitor. Pide el permiso de Accesibilidad: si falta, lo dice y ofrece abrirlo, y revisa cada 3 s hasta que esté.
+     En Windows son Ctrl + Alt + F1 / F2 sobre cualquier pantalla (sin permiso que pedir); se muestran como teclas.
      `dentro` lo dibuja como filas sueltas, para ponerlo dentro de otro panel (Automatizaciones). -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -13,7 +14,16 @@
 
   let ajustes = $state<EstadoAjustes | null>(null);
   let cambiando = $state(false);
-  const faltaPermiso = $derived(!!ajustes && !ajustes.permiso);
+  // Windows no pide permiso: nunca se muestra el aviso.
+  const faltaPermiso = $derived(esMac && !!ajustes && !ajustes.permiso);
+  const titulo = esMac
+    ? 'Teclas de brillo en el monitor bajo el mouse'
+    : 'Brillo con el teclado en el monitor bajo el mouse';
+  /** Las combinaciones de Windows, para dibujarlas como teclas. */
+  const combos = [
+    { teclas: ['Ctrl', 'Alt', 'F1'], accion: 'Bajar' },
+    { teclas: ['Ctrl', 'Alt', 'F2'], accion: 'Subir' },
+  ];
 
   async function alternar() {
     if (!ajustes) return;
@@ -31,12 +41,12 @@
   }
 
   onMount(() => {
-    if (!esMac) return;
     const leer = () =>
       leerAjustes()
         .then((a) => (ajustes = a))
         .catch(() => {});
     leer();
+    if (!esMac) return;
     // Mientras falte el permiso, se revisa cada 3 s para mostrar cuando ya está.
     const intervalo = setInterval(() => {
       if (faltaPermiso && document.visibilityState === 'visible') leer();
@@ -45,25 +55,33 @@
   });
 </script>
 
-<!-- Las teclas de brillo solo existen en la Mac; en Windows el brillo se cambia desde Nexo o el widget. -->
-{#if esMac}
-
 {#snippet contenido(a: EstadoAjustes)}
   <div class="fila">
     <span class="ficha" class:activa={a.teclasBrillo && a.permiso}><Icono nombre="teclado" tamano={18} /></span>
     <div class="textos">
-      <div class="titulo">Teclas de brillo en el monitor bajo el mouse</div>
-      <div class="ayuda">
-        Con el mouse sobre un monitor externo, las teclas de brillo cambian ese monitor. Sobre la pantalla de la Mac
-        funcionan como siempre.
-      </div>
+      <div class="titulo">{titulo}</div>
+      {#if esMac}
+        <div class="ayuda">
+          Con el mouse sobre un monitor externo, las teclas de brillo cambian ese monitor. Sobre la pantalla de la Mac
+          funcionan como siempre.
+        </div>
+      {:else}
+        <div class="ayuda">
+          Pon el mouse sobre una pantalla y usa Ctrl + Alt + F1 para bajar y Ctrl + Alt + F2 para subir el brillo.
+          Puedes asignar esas combinaciones a teclas de tu Wave Keys o botones del MX Master 4 en Logi Options+.
+        </div>
+        <!-- Lo mismo que dice la ayuda, en teclas: el lector de pantalla ya lo leyó arriba. -->
+        <div class="combos" class:apagado={!a.teclasBrillo} aria-hidden="true">
+          {#each combos as c (c.accion)}
+            <span class="combo">
+              <span class="teclas">{#each c.teclas as t (t)}<kbd>{t}</kbd>{/each}</span>
+              <span>{c.accion}</span>
+            </span>
+          {/each}
+        </div>
+      {/if}
     </div>
-    <Interruptor
-      encendido={a.teclasBrillo}
-      cargando={cambiando}
-      etiqueta="Teclas de brillo en el monitor bajo el mouse"
-      oncambio={alternar}
-    />
+    <Interruptor encendido={a.teclasBrillo} cargando={cambiando} etiqueta={titulo} oncambio={alternar} />
   </div>
 
   {#if faltaPermiso}
@@ -87,7 +105,6 @@
       {@render contenido(ajustes)}
     </section>
   {/if}
-{/if}
 {/if}
 
 <style>
@@ -143,6 +160,48 @@
     font-size: 12.5px;
     line-height: 18px;
     color: var(--texto-2);
+  }
+
+  /* ---------- Teclas (Windows) ---------- */
+  .combos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin-top: 10px;
+    transition: opacity var(--dur-color) ease;
+  }
+  .combos.apagado {
+    opacity: 0.55;
+  }
+  .combo {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--texto-2);
+  }
+  .teclas {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  kbd {
+    display: inline-grid;
+    place-items: center;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 7px;
+    border-radius: 7px;
+    background: var(--superficie);
+    box-shadow:
+      inset 0 0 0 1px var(--borde-fuerte),
+      inset 0 -1.5px 0 var(--borde-fuerte);
+    color: var(--texto);
+    font-family: var(--fuente);
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 600;
+    white-space: nowrap;
   }
 
   .permiso {

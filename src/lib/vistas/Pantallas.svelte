@@ -3,7 +3,7 @@
      Al cambiar un modo se pregunta si mantenerlo; sin respuesta en 15 s, vuelve al anterior (como macOS). -->
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { cambiarModoPantalla, esMac, hacerPrincipal, modosPantalla } from '$lib/api-sistema';
+  import { cambiarModoPantalla, hacerPrincipal, modosPantalla } from '$lib/api-sistema';
   import type { Pantalla } from '$lib/tipos';
   import type { ModoPantalla, PantallaSistema } from '$lib/tipos-sistema';
   import TarjetaPantalla from '$lib/componentes/TarjetaPantalla.svelte';
@@ -160,9 +160,8 @@
     </div>
   {/if}
 
-  {#if esMac}
-    <PanelAtajos {onerror} />
-  {/if}
+  <!-- Mac: teclas de brillo; Windows: Ctrl + Alt + F1 / F2. -->
+  <PanelAtajos {onerror} />
 </div>
 
 <Dialogo

@@ -139,18 +139,17 @@
       </section>
     {/each}
 
-    {#if esMac}
-      <section class="panel vidrio" aria-label="Pantallas">
-        <div class="cabeza">
-          <span class="miniatura"><Ilustracion tipo="monitor" encendido /></span>
-          <div class="cabeza__textos">
-            <h2>Pantallas</h2>
-            <p>Atajo de brillo</p>
-          </div>
+    <!-- Mac: teclas de brillo; Windows: Ctrl + Alt + F1 / F2. -->
+    <section class="panel vidrio" aria-label="Pantallas">
+      <div class="cabeza">
+        <span class="miniatura"><Ilustracion tipo="monitor" encendido /></span>
+        <div class="cabeza__textos">
+          <h2>Pantallas</h2>
+          <p>Atajo de brillo</p>
         </div>
-        <PanelAtajos {onerror} dentro />
-      </section>
-    {/if}
+      </div>
+      <PanelAtajos {onerror} dentro />
+    </section>
   </div>
 </div>
 

@@ -210,6 +210,8 @@ struct Datos {
     windows: bool,
     /// F13 hace la captura (está encendido en Remoto y hay permiso de Accesibilidad).
     f13: bool,
+    /// Windows: Ctrl+Alt+F1 / F2 cambian el brillo (se dice junto a "Brillo").
+    teclas_brillo: bool,
     /// Destinos de XDrop con Nexo en línea: (dirección, nombre).
     destinos: Vec<(String, String)>,
     sonido: Vec<DispositivoAudio>,
@@ -226,6 +228,7 @@ impl Datos {
             mac: cfg!(target_os = "macos"),
             windows: cfg!(windows),
             f13: false,
+            teclas_brillo: false,
             destinos: Vec::new(),
             sonido: Vec::new(),
             pantalla: None,
@@ -237,8 +240,10 @@ impl Datos {
     /// Todo lo que se lee es rápido (sin abrir programas): el sonido, el brillo y lo guardado.
     fn leer(app: &AppHandle) -> Self {
         let pantalla = app.try_state::<Arc<Pantallas>>().and_then(|p| elegir_pantalla(p.listar()));
+        let guardados = ajustes::cargar(app);
         Datos {
-            f13: cfg!(target_os = "macos") && ajustes::cargar(app).remoto.captura && teclas::permiso_concedido(),
+            f13: cfg!(target_os = "macos") && guardados.remoto.captura && teclas::permiso_concedido(),
+            teclas_brillo: cfg!(windows) && guardados.teclas_brillo,
             destinos: xdrop::destinos_en_linea(),
             sonido: audio::listar(),
             pantalla,
@@ -304,7 +309,7 @@ fn armar(d: &Datos) -> Vec<Pieza> {
 
     if let Some(p) = &d.pantalla {
         m.push(Pieza::Raya);
-        m.push(brillo(p));
+        m.push(brillo(p, d.windows && d.teclas_brillo));
     }
 
     let aparatos = aparatos(d);
@@ -374,8 +379,8 @@ fn sonido(lista: &[DispositivoAudio]) -> Vec<Pieza> {
     v
 }
 
-/// "Brillo: 40 %" con los niveles fijos y los pasos de 10.
-fn brillo(p: &Pantalla) -> Pieza {
+/// "Brillo: 40 %" con los niveles fijos y los pasos de 10. En Windows, con el atajo si está encendido.
+fn brillo(p: &Pantalla, atajo: bool) -> Pieza {
     let nivel = p.brillo;
     let mut hijos: Vec<Pieza> = [(0, "Mínimo"), (25, "25 %"), (50, "50 %"), (75, "75 %"), (100, "Máximo")]
         .into_iter()
@@ -384,7 +389,11 @@ fn brillo(p: &Pantalla) -> Pieza {
     hijos.push(Pieza::Raya);
     hijos.push(Pieza::Item { id: "brillo-bajar".into(), texto: "Bajar 10 %".into(), activo: nivel != Some(0), atajo: None });
     hijos.push(Pieza::Item { id: "brillo-subir".into(), texto: "Subir 10 %".into(), activo: nivel != Some(100), atajo: None });
-    Pieza::Sub { id: "brillo".into(), texto: nivel.map_or_else(|| "Brillo".into(), |n| format!("Brillo: {n} %")), hijos }
+    let mut texto = nivel.map_or_else(|| "Brillo".to_string(), |n| format!("Brillo: {n} %"));
+    if atajo {
+        texto.push_str(" · Ctrl+Alt+F1/F2");
+    }
+    Pieza::Sub { id: "brillo".into(), texto, hijos }
 }
 
 /// El nombre con que se muestra un aparato: su alias en Nexo o el suyo.
@@ -869,6 +878,7 @@ mod pruebas {
             mac: true,
             windows: false,
             f13: true,
+            teclas_brillo: false,
             destinos: vec![("100.64.0.2".into(), "innotech1017".into())],
             sonido: vec![
                 sonido_de("BuiltInSpeakerDevice", "Bocinas de MacBook Pro", true, false, Some(false)),
@@ -940,6 +950,10 @@ mod pruebas {
         assert!(!lista.iter().any(|i| i.starts_with("xdrop-captura")));
         assert_eq!(lista[0], "xdrop-copiado:100.64.0.2");
         assert!(lista.iter().any(|i| i == "conectar-mac"));
+        assert_eq!(texto_de(&m, "brillo"), Some("Brillo: 40 %"));
+        // Con las teclas de brillo encendidas, el atajo va junto al nivel.
+        let m = armar(&Datos { mac: false, windows: true, teclas_brillo: true, ..mac_completa() });
+        assert_eq!(texto_de(&m, "brillo"), Some("Brillo: 40 % · Ctrl+Alt+F1/F2"));
     }
 
     #[test]

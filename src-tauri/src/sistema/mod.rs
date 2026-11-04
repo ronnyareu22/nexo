@@ -47,7 +47,7 @@ pub fn leer_ajustes(app: AppHandle) -> EstadoAjustes {
     estado(&app)
 }
 
-/// Enciende o apaga "teclas de brillo en el monitor bajo el mouse".
+/// Enciende o apaga "teclas de brillo en el monitor bajo el mouse" (en Windows, Ctrl+Alt+F1 / F2).
 /// Si falta el permiso, abre el aviso de macOS y lo activa solo en cuanto se conceda (espera hasta 3 min).
 #[tauri::command]
 pub fn usar_teclas_brillo(app: AppHandle, pantallas: State<'_, Arc<Pantallas>>, activar: bool) -> Result<EstadoAjustes, String> {
@@ -68,6 +68,9 @@ pub fn usar_teclas_brillo(app: AppHandle, pantallas: State<'_, Arc<Pantallas>>, 
             }
         });
     }
+    // Windows: el menú del ícono dice el atajo junto a "Brillo".
+    #[cfg(windows)]
+    bandeja::actualizar(&app);
     Ok(estado(&app))
 }
 

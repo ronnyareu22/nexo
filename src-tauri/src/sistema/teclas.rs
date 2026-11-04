@@ -1,9 +1,14 @@
-//! Teclas de brillo de la Mac → monitor externo bajo el mouse.
+//! Teclas de brillo → pantalla bajo el mouse.
 //!
-//! Escucha las teclas de brillo (eventos "system defined" de macOS). Si el mouse está sobre
+//! Mac: escucha las teclas de brillo (eventos "system defined" de macOS). Si el mouse está sobre
 //! un monitor externo que responde a DDC, Nexo cambia ese monitor y se queda con la tecla.
 //! Si está sobre la pantalla de la MacBook, la deja pasar y macOS hace lo de siempre.
-//! Necesita el permiso de Accesibilidad. En Windows no hay atajo (ver abajo).
+//! Necesita el permiso de Accesibilidad.
+//!
+//! Windows: Ctrl+Alt+F1 baja y Ctrl+Alt+F2 sube el brillo de la pantalla bajo el mouse (externa por DDC/CI o
+//! la del portátil por WMI), con el mismo aviso. Las ve el gancho de teclado de `remoto_windows` (uno solo
+//! para todo), que se pone primero aunque RustDesk esté al frente. Ctrl+Alt+↑/↓ no: con los controladores
+//! de Intel giran la pantalla, y VS Code las usa para poner cursores.
 
 use crate::dispositivos::pantallas::Pantallas;
 use std::sync::Arc;
@@ -11,12 +16,8 @@ use std::sync::Arc;
 #[cfg(target_os = "macos")]
 pub use mac::{activar, permiso_concedido, pedir_permiso};
 
-// Windows: los teclados de escritorio no mandan teclas de brillo como la Mac, así que no hay atajo.
-// El brillo se cambia desde Nexo o el widget. Apagarlo siempre funciona (no hay nada que detener).
 #[cfg(windows)]
-pub fn activar(_pantallas: Arc<Pantallas>, encendido: bool) -> Result<(), String> {
-    if encendido { Err("En Windows usa el brillo desde Nexo o el widget.".into()) } else { Ok(()) }
-}
+pub use win::{activar, pulsar};
 /// Windows no pide permiso de Accesibilidad.
 #[cfg(windows)]
 pub fn permiso_concedido() -> bool {
@@ -35,6 +36,59 @@ pub fn permiso_concedido() -> bool {
 }
 #[cfg(not(any(target_os = "macos", windows)))]
 pub fn pedir_permiso() {}
+
+#[cfg(windows)]
+mod win {
+    use super::*;
+    use std::sync::OnceLock;
+    use std::sync::mpsc::{self, Receiver, SyncSender};
+
+    static PANTALLAS: OnceLock<Arc<Pantallas>> = OnceLock::new();
+    /// Los toques van a un hilo propio: el gancho de teclado no espera nada.
+    static CANAL: OnceLock<SyncSender<i32>> = OnceLock::new();
+
+    /// Enciende o apaga Ctrl+Alt+F1 / F2. La primera vez crea el hilo que atiende los toques.
+    pub fn activar(pantallas: Arc<Pantallas>, encendido: bool) -> Result<(), String> {
+        let _ = PANTALLAS.set(pantallas);
+        if encendido && CANAL.get().is_none() {
+            let (tx, rx) = mpsc::sync_channel(16);
+            std::thread::Builder::new()
+                .name("nexo-teclas".into())
+                .stack_size(256 * 1024)
+                .spawn(move || trabajar(rx))
+                .map_err(|e| format!("No se pudo escuchar las teclas de brillo ({e})"))?;
+            let _ = CANAL.set(tx);
+        }
+        crate::sistema::remoto_windows::usar_brillo(encendido);
+        Ok(())
+    }
+
+    /// Lo llama el gancho de teclado: −1 baja, +1 sube. No espera; si la cola está llena, el toque se pierde.
+    pub fn pulsar(pasos: i32) {
+        if let Some(tx) = CANAL.get() {
+            let _ = tx.try_send(pasos);
+        }
+    }
+
+    /// Busca la pantalla bajo el mouse y le manda el paso (1/16, como en la Mac). El aviso lo muestra el hilo de pantallas.
+    fn trabajar(rx: Receiver<i32>) {
+        while let Ok(primero) = rx.recv() {
+            // Los toques que ya esperan se juntan en uno.
+            let pasos = primero + rx.try_iter().sum::<i32>();
+            if pasos == 0 {
+                continue;
+            }
+            let (Some(p), Some(id)) = (PANTALLAS.get(), crate::dispositivos::pantallas::id_bajo_el_cursor()) else {
+                continue;
+            };
+            // Quizá se acaba de conectar o se activó DDC/CI en su menú: se mira de nuevo antes del paso.
+            if !p.es_controlable(id) {
+                p.refrescar();
+            }
+            p.paso(id, pasos);
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod mac {

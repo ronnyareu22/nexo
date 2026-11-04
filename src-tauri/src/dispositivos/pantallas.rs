@@ -50,7 +50,7 @@ enum Orden {
     Listar(mpsc::Sender<Vec<Pantalla>>),
     PonerBrillo(u32, u8, mpsc::Sender<Result<u8, String>>),
     /// Un toque de tecla: +1 sube, −1 baja (en pasos de 1/16).
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // hoy solo lo usa el atajo de teclas de la Mac
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))] // lo usa el atajo de teclas (Mac y Windows)
     Paso(u32, i32),
     Refrescar,
 }
@@ -61,7 +61,8 @@ pub type Aviso = Box<dyn Fn(u32, u8) + Send>;
 pub struct Pantallas {
     tx: Mutex<mpsc::Sender<Orden>>,
     /// Monitores externos que responden a DDC (lo consulta el atajo de teclas sin esperar).
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    /// En Windows también la pantalla del portátil, si WMI deja cambiarla.
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
     controlables: Arc<Mutex<HashSet<u32>>>,
     /// Último brillo conocido de cada monitor externo (para leerlo al instante).
     /// En Windows también el de la pantalla del portátil (WMI tampoco se lee al instante).
@@ -102,12 +103,12 @@ impl Pantallas {
     }
 
     /// Lo usa el atajo de teclas: no espera respuesta.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
     pub fn paso(&self, id: u32, pasos: i32) {
         self.enviar(Orden::Paso(id, pasos));
     }
 
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
     pub fn refrescar(&self) {
         self.enviar(Orden::Refrescar);
     }
@@ -123,7 +124,7 @@ impl Pantallas {
         lista
     }
 
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
     pub fn es_controlable(&self, id: u32) -> bool {
         self.controlables.lock().map(|c| c.contains(&id)).unwrap_or(false)
     }
@@ -140,7 +141,7 @@ pub use mac::{cambiar_modo, hacer_principal, modos};
 mod win;
 
 #[cfg(windows)]
-pub use win::{area_de_trabajo, cambiar_modo, hacer_principal, modos};
+pub use win::{area_de_trabajo, cambiar_modo, hacer_principal, id_bajo_el_cursor, modos};
 
 #[cfg(windows)]
 use win::trabajador;

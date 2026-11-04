@@ -32,8 +32,20 @@ pub fn lanzar() {
     }
     let Some(app) = super::mac::APP.get().cloned() else { return };
     let _ = std::thread::Builder::new().name("nexo-captura".into()).spawn(move || {
-        if let Err(e) = capturar(&app) {
-            let _ = app.notification().builder().title("No se pudo capturar").body(e).show();
+        match capturar(&app) {
+            // Aviso de que quedó lista: por RustDesk no siempre se nota que la captura terminó.
+            Ok(Some(c)) if c.copiada => {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Captura copiada")
+                    .body(format!("{} × {} · pégala con Ctrl + V", c.ancho, c.alto))
+                    .show();
+            }
+            Ok(_) => {}
+            Err(e) => {
+                let _ = app.notification().builder().title("No se pudo capturar").body(e).show();
+            }
         }
     });
 }

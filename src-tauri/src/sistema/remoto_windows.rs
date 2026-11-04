@@ -17,6 +17,9 @@
 //! la manda como la tecla de verdad y Windows no ve ningún atajo (ni Vista de tareas, ni Inicio,
 //! ni Win+↑ maximizando la ventana). Cada lote es completo (pulsa y suelta sus modificadores), así
 //! que en la Mac nada queda apretado aunque los gestos lleguen muy seguidos.
+//!
+//! El mismo gancho atiende las teclas de brillo (Ctrl+Alt+F1 / F2, ver `teclas`): se pone si la traducción
+//! o las teclas de brillo están encendidas, y nunca hay dos. Las de brillo valen con cualquier ventana al frente.
 
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -29,8 +32,8 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    SendInput, VIRTUAL_KEY, VK_CONTROL, VK_D, VK_E, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
-    VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_S, VK_SHIFT, VK_SNAPSHOT, VK_TAB,
+    SendInput, VIRTUAL_KEY, VK_CONTROL, VK_D, VK_E, VK_F1, VK_F2, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_MENU, VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_S, VK_SHIFT, VK_SNAPSHOT, VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GetForegroundWindow, GetMessageW, GetWindowTextW,
@@ -42,21 +45,25 @@ use windows::core::{PCWSTR, PWSTR};
 
 /// Si la traducción está encendida (el ajuste "traducir"). La cambia `usar`.
 pub static ACTIVO: AtomicBool = AtomicBool::new(true);
+/// Si las teclas de brillo están encendidas (el ajuste "teclas de brillo"). La cambia `usar_brillo`.
+static BRILLO: AtomicBool = AtomicBool::new(false);
 
 /// Marca de las teclas que inyecta Nexo ("NEXO"): el gancho las deja pasar sin mirarlas.
 const MARCA: usize = 0x4E45_584F;
 /// Tecla virtual sin uso en Windows: lleva el scan code a RustDesk sin que Windows vea un atajo.
 const VK_NEUTRA: u16 = 0xE8;
-/// Mensaje al hilo del gancho: mirar ACTIVO y poner o quitar el gancho.
+/// Mensaje al hilo del gancho: mirar ACTIVO y BRILLO y poner o quitar el gancho.
 const REVISAR: u32 = WM_APP + 0x4E;
 /// Dos bajadas de una tecla tragada más separadas que esto ya no son repetición (se perdió la soltada).
 const REPETICION_MS: u32 = 1200;
+/// Con las teclas de brillo apretadas, un paso cada 80 ms como mucho (unos 12 por segundo).
+const PAUSA_BRILLO_MS: u32 = 80;
 
 static INICIADO: AtomicBool = AtomicBool::new(false);
 static HILO: AtomicU32 = AtomicU32::new(0);
 static ESCUCHANDO: AtomicBool = AtomicBool::new(false);
 
-/// Arranca el hilo del gancho (una sola vez). Pone el gancho si ACTIVO está encendido.
+/// Arranca el hilo del gancho (una sola vez). Pone el gancho si ACTIVO o BRILLO están encendidos.
 pub fn iniciar(_app: AppHandle) {
     if INICIADO.swap(true, Ordering::SeqCst) {
         return;
@@ -64,13 +71,24 @@ pub fn iniciar(_app: AppHandle) {
     let creado = std::thread::Builder::new().name("nexo-remoto-teclado".into()).stack_size(256 * 1024).spawn(hilo);
     if let Err(e) = creado {
         INICIADO.store(false, Ordering::SeqCst);
-        eprintln!("Nexo: no se pudo iniciar la traducción de atajos para RustDesk ({e})");
+        eprintln!("Nexo: no se pudo iniciar el gancho de teclado (atajos para RustDesk y teclas de brillo) ({e})");
     }
 }
 
-/// Enciende o apaga la traducción. Apagada, no queda ningún gancho puesto.
+/// Enciende o apaga la traducción. Si las teclas de brillo también están apagadas, no queda ningún gancho puesto.
 pub fn usar(activo: bool) {
     ACTIVO.store(activo, Ordering::SeqCst);
+    revisar();
+}
+
+/// Enciende o apaga las teclas de brillo (Ctrl+Alt+F1 / F2) en el mismo gancho.
+pub fn usar_brillo(activo: bool) {
+    BRILLO.store(activo, Ordering::SeqCst);
+    revisar();
+}
+
+/// Pide al hilo del gancho que lo ponga o lo quite. Si el hilo aún no arranca, lo mira al arrancar.
+fn revisar() {
     let hilo = HILO.load(Ordering::SeqCst);
     if hilo != 0 {
         let _ = unsafe { PostThreadMessageW(hilo, REVISAR, WPARAM(0), LPARAM(0)) };
@@ -200,6 +218,18 @@ enum Accion {
     BuscarFinder,
 }
 
+/// Ctrl+Alt+F1 baja (−1) y Ctrl+Alt+F2 sube (+1) el brillo. Sin Win ni Shift, para no pisar otros atajos.
+fn tecla_de_brillo(vk: u16, m: u8) -> Option<i32> {
+    if m & CTRL == 0 || m & ALT == 0 || m & (WIN | MAYUS) != 0 {
+        return None;
+    }
+    match VIRTUAL_KEY(vk) {
+        VK_F1 => Some(-1),
+        VK_F2 => Some(1),
+        _ => None,
+    }
+}
+
 /// Qué combinación es, mirando la tecla y los modificadores abajo.
 fn combinacion(vk: u16, m: u8) -> Option<Accion> {
     let (win, ctrl, alt, mayus) = (m & WIN != 0, m & CTRL != 0, m & ALT != 0, m & MAYUS != 0);
@@ -268,6 +298,8 @@ struct Estado {
     /// Último proceso revisado y si es RustDesk.
     pid: u32,
     pid_rustdesk: bool,
+    /// Hora del último paso de brillo (para no pasar de unos 12 por segundo).
+    ultimo_brillo: Option<u32>,
 }
 
 impl Estado {
@@ -281,6 +313,7 @@ impl Estado {
             imppnt_abajo: false,
             pid: 0,
             pid_rustdesk: false,
+            ultimo_brillo: None,
         }
     }
 }
@@ -322,6 +355,7 @@ fn procesar(e: &mut Estado, k: &KBDLLHOOKSTRUCT) -> bool {
     let vk = (k.vkCode & 0xFF) as u16;
     let arriba = k.flags.contains(LLKHF_UP);
     let ext = k.flags.contains(LLKHF_EXTENDED);
+    let traducir = ACTIVO.load(Ordering::Relaxed);
 
     if let Some(bit) = bit_de(vk, k.scanCode, ext) {
         if !arriba {
@@ -358,10 +392,29 @@ fn procesar(e: &mut Estado, k: &KBDLLHOOKSTRUCT) -> bool {
             return true;
         }
         // Imprimir pantalla que llega sin su bajada.
-        if solo_soltada && e.mods & (WIN | CTRL | ALT) == 0 && sesion_al_frente(e) {
+        if traducir && solo_soltada && e.mods & (WIN | CTRL | ALT) == 0 && sesion_al_frente(e) {
             return enviar(&lote_de(Accion::Captura, e));
         }
         return false;
+    }
+
+    // Teclas de brillo: antes que la traducción y con cualquier ventana al frente (también RustDesk).
+    // El trabajo va a otro hilo (`teclas::pulsar`): aquí no se espera nada.
+    if BRILLO.load(Ordering::Relaxed) {
+        if let Some(pasos) = tecla_de_brillo(vk, e.mods) {
+            e.tragadas[i] = Some(k.time);
+            let listo = match e.ultimo_brillo {
+                Some(antes) => k.time.wrapping_sub(antes) >= PAUSA_BRILLO_MS,
+                None => true,
+            };
+            if listo {
+                e.ultimo_brillo = Some(k.time);
+                super::teclas::pulsar(pasos);
+            }
+            // Al soltar Alt va detrás de un relleno: la ventana del frente no abre su menú.
+            e.alt_usada = true;
+            return true;
+        }
     }
 
     if vk == VK_SNAPSHOT.0 {
@@ -377,6 +430,9 @@ fn procesar(e: &mut Estado, k: &KBDLLHOOKSTRUCT) -> bool {
             return true;
         }
         e.tragadas[i] = None;
+    }
+    if !traducir {
+        return false;
     }
     let Some(accion) = combinacion(vk, e.mods) else { return false };
     if !sesion_al_frente(e) || !enviar(&lote_de(accion, e)) {
@@ -396,7 +452,8 @@ fn procesar(e: &mut Estado, k: &KBDLLHOOKSTRUCT) -> bool {
 }
 
 unsafe extern "system" fn al_teclado(codigo: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if codigo == HC_ACTION as i32 && lparam.0 != 0 && ACTIVO.load(Ordering::Relaxed) {
+    let escuchar = ACTIVO.load(Ordering::Relaxed) || BRILLO.load(Ordering::Relaxed);
+    if codigo == HC_ACTION as i32 && lparam.0 != 0 && escuchar {
         let k = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
         // Lo que inyecta Nexo pasa sin mirarse. Lo de otros programas (Logi Options+) sí se traduce.
         if k.dwExtraInfo != MARCA {
@@ -528,7 +585,7 @@ fn instalar() {
             let _ = GANCHO.try_with(|g| g.set(Some(gancho)));
         }
         Err(e) => {
-            eprintln!("Nexo: no se pudo escuchar el teclado para RustDesk ({e})");
+            eprintln!("Nexo: no se pudo escuchar el teclado (atajos para RustDesk y teclas de brillo) ({e})");
             return;
         }
     }
@@ -565,11 +622,27 @@ fn quitar() {
     ESCUCHANDO.store(false, Ordering::SeqCst);
 }
 
+/// Pone el gancho si la traducción o las teclas de brillo lo necesitan; si no, lo quita.
 fn aplicar() {
-    if ACTIVO.load(Ordering::SeqCst) { instalar() } else { quitar() }
+    let traducir = ACTIVO.load(Ordering::SeqCst);
+    if !traducir && !BRILLO.load(Ordering::SeqCst) {
+        quitar();
+        return;
+    }
+    instalar();
+    if !traducir {
+        // El gancho sigue solo por el brillo: nada de la traducción queda a medias (⌘ apretado en la Mac).
+        let _ = ESTADO.try_with(|celda| {
+            if let Ok(mut e) = celda.try_borrow_mut() {
+                soltar_selector(&mut e);
+                e.win_usada = false;
+                e.alt_usada = false;
+            }
+        });
+    }
 }
 
-/// El hilo: atiende el gancho (Windows lo llama desde aquí) y los cambios de ACTIVO.
+/// El hilo: atiende el gancho (Windows lo llama desde aquí) y los cambios de ACTIVO y BRILLO.
 fn hilo() {
     let mut msg = MSG::default();
     unsafe {
