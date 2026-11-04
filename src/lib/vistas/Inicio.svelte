@@ -6,11 +6,15 @@
     de la pantalla, un punto por aparato en Bluetooth y las fotos de los aparatos;
   - "Tus dispositivos": aparatos y pantallas en una sola tarjeta, con atajos propios (silenciar los audífonos,
     subir o bajar el brillo) además del interruptor para conectar;
-  - "Actividad reciente" del historial real, agrupada por día.
+  - "Actividad reciente" del historial real, agrupada por día;
+  - al pie, sin el perfil de trabajo remoto, una tarjeta chica "Conecta tus equipos" que lleva a la guía de Remoto
+    (se cierra y no vuelve en este equipo).
   La aurora son solo degradados quietos (sin desenfoque ni animación). Ningún texto se corta: todo baja de línea.
 -->
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import { esMac } from '$lib/api-sistema';
+  import { perfil, recargar } from '$lib/perfil.svelte';
   import type { Dispositivo, Estado, Pantalla, Registro, Sonido } from '$lib/tipos';
   import { esDeSonido, nivelPrincipal, nombreDe } from '$lib/tipos';
   import { ajustarSonido, leerHistoriales, leerSonido, ponerBrillo } from '$lib/api';
@@ -40,6 +44,29 @@
     onalternar: (d: Dispositivo) => void;
     pendienteId: string | null;
   } = $props();
+
+  // --- "Conecta tus equipos": sin el perfil (y sin "Nunca"), hasta que se cierre ---
+  const CLAVE_CONECTA = 'nexo-inicio-conecta-cerrada';
+  function conectaCerrada(): boolean {
+    try {
+      return localStorage.getItem(CLAVE_CONECTA) === '1';
+    } catch {
+      return false;
+    }
+  }
+  let cerrada = $state(conectaCerrada());
+  const verConecta = $derived(perfil.leido && !perfil.activo && perfil.estado?.modo !== 'nunca' && !cerrada);
+  function cerrarConecta() {
+    cerrada = true;
+    try {
+      localStorage.setItem(CLAVE_CONECTA, '1');
+    } catch {
+      // Sin almacenamiento: no vuelve hasta cerrar el panel.
+    }
+  }
+  onMount(() => {
+    recargar();
+  });
 
   const MAXIMO_FILAS = 3;
   const MAXIMO_PANTALLAS = 2;
@@ -493,6 +520,27 @@
       {/if}
     </section>
   </div>
+
+  {#if verConecta}
+    <!-- ---------- Conecta tus equipos (discreta, al pie) ---------- -->
+    <aside class="conecta vidrio" aria-labelledby="inicio-conecta">
+      <span class="ficha-icono tenue"><Icono nombre="conectar" tamano={19} /></span>
+      <div class="t-textos">
+        <h2 class="t-titulo" id="inicio-conecta">Conecta tus equipos</h2>
+        <p class="t-sub">
+          Une esta {esMac ? 'Mac' : 'PC'} con tu otra computadora para pasarte archivos y verla desde aquí.
+        </p>
+      </div>
+      <div class="conecta__acciones">
+        <button class="enlace" type="button" onclick={() => onir('remoto')}>
+          Empezar <Icono nombre="chevron" tamano={14} />
+        </button>
+        <button class="conecta__cerrar" type="button" aria-label="No mostrar más" use:tooltip={'No mostrar más'} onclick={cerrarConecta}>
+          <Icono nombre="cerrar" tamano={15} />
+        </button>
+      </div>
+    </aside>
+  {/if}
 </div>
 
 <style>
@@ -814,6 +862,43 @@
   }
   .enlace:hover {
     background: var(--superficie-hover);
+  }
+
+  /* "Conecta tus equipos": una franja chica al pie, sin llamar la atención. */
+  .conecta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    padding: 12px 12px 12px 16px;
+    border-radius: var(--radio-md);
+  }
+  .conecta .t-textos {
+    flex: 1 1 260px;
+  }
+  .conecta__acciones {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .conecta__cerrar {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--texto-3);
+    transition:
+      background-color var(--dur-color) ease,
+      color var(--dur-color) ease;
+  }
+  .conecta__cerrar:hover {
+    background: var(--superficie-hover);
+    color: var(--texto);
   }
 
   ul,

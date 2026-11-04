@@ -211,6 +211,7 @@ fn buscar_en_macs(edad: Duration) -> (bool, Option<Oferta>, Option<String>) {
     match info.estado {
         "no instalado" => return (false, None, Some("Tailscale no está instalado en este equipo.".into())),
         "detenido" => return (false, None, Some("Tailscale no está conectado en este equipo.".into())),
+        "sin sesion" => return (false, None, Some("Entra con tu cuenta en Tailscale en este equipo.".into())),
         _ => {}
     }
     let macs: Vec<(String, Ipv4Addr)> = info

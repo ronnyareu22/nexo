@@ -60,7 +60,8 @@
     | 'red'
     | 'bombilla'
     | 'camara'
-    | 'chevron-arriba';
+    | 'chevron-arriba'
+    | 'externo';
 </script>
 
 <script lang="ts">
@@ -279,5 +280,10 @@
     <path d="M15.5 10.5l6-3.5v10l-6-3.5" />
   {:else if nombre === 'chevron-arriba'}
     <path d="M6 15l6-6 6 6" />
+  {:else if nombre === 'externo'}
+    <!-- Abre en el navegador: una flecha que sale de la caja -->
+    <path d="M13.5 4.5h6v6" />
+    <path d="M19.5 4.5L11 13" />
+    <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
   {/if}
 </svg>

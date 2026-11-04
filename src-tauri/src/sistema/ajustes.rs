@@ -44,6 +44,8 @@ pub struct Ajustes {
     pub widgets_brillo: Vec<WidgetBrillo>,
     /// Mac: la pantalla virtual para RustDesk, su resolución y qué hacer con la sesión remota (ver `pantalla_virtual`).
     pub pantalla_virtual: super::pantalla_virtual::AjustesPantallaVirtual,
+    /// El trabajo remoto: Automático, Siempre o Nunca, y el último otro equipo encontrado (ver `equipos`).
+    pub equipos: super::equipos::AjustesEquipos,
 }
 
 /// Un widget de brillo encendido: su pantalla y dónde lo dejó la persona (en puntos en Mac y en píxeles reales
@@ -73,6 +75,7 @@ impl Default for Ajustes {
             minimos_brillo: BTreeMap::new(),
             widgets_brillo: Vec::new(),
             pantalla_virtual: super::pantalla_virtual::AjustesPantallaVirtual::default(),
+            equipos: super::equipos::AjustesEquipos::default(),
         }
     }
 }

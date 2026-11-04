@@ -1,6 +1,8 @@
 <!--
   Analítica: cómo está cada equipo ahora mismo, sobre todo la Mac de la casa vista desde el PC de la oficina.
   Arriba, el selector del equipo ("Esta PC" / "Mi Mac · demo-sige"): de entrada, el otro equipo si responde.
+  Solo están los equipos con Nexo abierto y el del perfil (perfil.svelte.ts), aunque duerma. Con este equipo solo,
+  su nombre a secas y un enlace discreto a la guía de Remoto para conectar el otro.
   Luego seis tarjetas: primero las que tienen tendencia de 5 minutos (CPU, memoria y red, con bajada, subida y lo
   que pasa por Tailscale) y después las cortas (temperatura en palabras, batería y disco), así cada fila queda pareja.
   Debajo, las apps que más gastan (CPU y memoria) y la sesión remota (RustDesk, pantalla virtual, XDrop, reposo)
@@ -15,6 +17,10 @@
   import type { Analitica, EquipoAnalitica, EstadoTermico, ProcesoApp } from '$lib/tipos-analitica';
   import Icono, { type Nombre } from '$lib/componentes/Icono.svelte';
   import Tendencia from '$lib/componentes/Tendencia.svelte';
+  import { perfil, recargar } from '$lib/perfil.svelte';
+
+  let { onir }: { /** Lleva a otra sección (el enlace a la guía, en Remoto). */ onir?: (seccion: string) => void } =
+    $props();
 
   const CADA = 2000;
   const EQUIPOS_CADA = 15000;
@@ -30,7 +36,11 @@
   let vueltas = 0;
 
   const claveDe = (e: EquipoAnalitica) => (e.propio ? 'local' : (e.ip ?? e.nombre));
-  const elegido = $derived(equipos.find((e) => claveDe(e) === clave) ?? null);
+  // Este equipo, los que tienen Nexo abierto y el del perfil (tu Mac o tu PC, aunque duerma).
+  const visibles = $derived(
+    equipos.filter((e) => e.propio || e.enLinea || (!!perfil.otro && e.ip === perfil.otro.ip)),
+  );
+  const elegido = $derived(visibles.find((e) => claveDe(e) === clave) ?? null);
   const foto = $derived(clave ? (datos[clave] ?? null) : null);
   const fallo = $derived(clave ? (fallos[clave] ?? null) : null);
   const esMac = $derived((foto?.plataforma ?? elegido?.plataforma) === 'mac');
@@ -93,7 +103,16 @@
     refrescar();
   }
 
+  // Si el equipo elegido ya no está en la lista (se fue sin ser el del perfil), vuelve a este.
+  $effect(() => {
+    if (clave && clave !== 'local' && equipos.length && !visibles.some((e) => claveDe(e) === clave)) {
+      clave = 'local';
+      refrescar();
+    }
+  });
+
   onMount(() => {
+    recargar();
     cargarEquipos();
     const aLaVista = () => document.visibilityState === 'visible';
     // Cada 2 s mientras se ve. Si el otro equipo no responde, se prueba cada 6 s.
@@ -330,9 +349,9 @@
       <h1>Analítica</h1>
       <p>Cómo está cada equipo ahora mismo. Nexo solo mide mientras miras.</p>
     </div>
-    {#if equipos.length > 1}
+    {#if visibles.length > 1}
       <div class="segmentado vidrio" role="group" aria-label="Equipo">
-        {#each equipos as e (claveDe(e))}
+        {#each visibles as e (claveDe(e))}
           <button
             type="button"
             class:elegido={clave === claveDe(e)}
@@ -345,6 +364,9 @@
           </button>
         {/each}
       </div>
+    {:else if visibles.length === 1}
+      <!-- Solo este equipo: su nombre, sin nada que elegir. -->
+      <p class="solo-equipo vidrio"><span>{etiqueta(visibles[0])}</span></p>
     {/if}
   </header>
 
@@ -353,8 +375,12 @@
     {estadoLinea.texto}
   </p>
 
-  {#if equipos.length === 1}
-    <p class="pista">Cuando tu otro equipo tenga Nexo abierto, lo podrás elegir aquí.</p>
+  {#if visibles.length === 1 && onir}
+    {@const ir = onir}
+    <button class="pista" type="button" onclick={() => ir('remoto')}>
+      Conecta otro equipo para verlo aquí
+      <Icono nombre="chevron" tamano={14} />
+    </button>
   {/if}
 
   {#if fallo && elegido && !elegido.propio}
@@ -753,10 +779,47 @@
   .estado.propio .estado__punto {
     background: var(--primario);
   }
+  /* Un enlace discreto a la guía de Remoto. */
   .pista {
-    margin: -8px 0 0;
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 4px;
+    margin: -10px 0 0 -8px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
     font: var(--letra-pequena);
-    color: var(--texto-3);
+    font-weight: 600;
+    color: var(--texto-2);
+    transition:
+      background-color var(--dur-color) ease,
+      color var(--dur-color) ease;
+  }
+  .pista:hover {
+    background: var(--superficie-hover);
+    color: var(--primario-texto);
+  }
+
+  /* Solo este equipo: como el selector, con su única opción elegida. */
+  .solo-equipo {
+    display: inline-flex;
+    margin: 0;
+    padding: 3px;
+    border-radius: var(--radio-pildora);
+  }
+  .solo-equipo span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 0 14px;
+    border: 1px solid var(--elegido-borde);
+    border-radius: var(--radio-pildora);
+    background: var(--elegido-bg);
+    color: var(--elegido-fg);
+    font-size: 13px;
+    font-weight: 600;
   }
 
   /* ---------- Sin respuesta ---------- */

@@ -7,6 +7,8 @@
   A la derecha, el historial. Con la ventana ancha y alta, todo cabe en la ventana y el historial se desplaza solo.
   Soltar en cualquier parte de la ventana también envía (CapaDrop.svelte).
   Los destinos se releen cada 10 s mientras se ve y al llegar algo; el avance llega por "drop-progreso".
+  Si ningún equipo tuyo tiene Nexo y no hay otro equipo guardado en el perfil, en lugar del destino va la guía
+  "Conecta tus equipos" (chica y sin el paso de RustDesk).
   Superficies sólidas, el hover solo cambia el color y ningún texto se corta: todo baja de línea.
 -->
 <script lang="ts">
@@ -33,6 +35,8 @@
   import Dialogo from '$lib/componentes/Dialogo.svelte';
   import AjustesXDrop from '$lib/componentes/AjustesXDrop.svelte';
   import RielXDrop from '$lib/componentes/RielXDrop.svelte';
+  import GuiaConexion from '$lib/componentes/GuiaConexion.svelte';
+  import { perfil, recargar } from '$lib/perfil.svelte';
 
   let { onerror }: { onerror: (texto: string) => void } = $props();
 
@@ -41,6 +45,8 @@
   let transferencias = $state<ProgresoDrop[]>([]);
 
   const destino = $derived(destinoActual());
+  // Ningún equipo tuyo con Nexo y ninguno guardado en el perfil: la guía en lugar de un destino vacío.
+  const sinEquipos = $derived(!drop.destinos.some((d) => d.enLinea) && !perfil.otro);
   const plataformaPropia = $derived<PlataformaEquipo>(estado?.plataforma ?? (esMac ? 'mac' : 'windows'));
   const iconoDe = (p: PlataformaEquipo): Nombre => (p === 'mac' ? 'portatil' : 'pantallas');
   const corto = (p: PlataformaEquipo) => (p === 'mac' ? 'Mac' : p === 'windows' ? 'PC' : 'Equipo');
@@ -272,6 +278,8 @@
       return { titulo: 'Falta Tailscale', detalle: 'XDrop viaja por Tailscale: instálalo en tus dos equipos con la misma cuenta.' };
     if (ts === 'detenido')
       return { titulo: 'Tailscale está desconectado', detalle: 'Conéctalo en este equipo para ver tus otros equipos.' };
+    if (ts === 'sin sesion')
+      return { titulo: 'Falta entrar en Tailscale', detalle: 'Abre Tailscale en este equipo y entra con tu cuenta.' };
     return {
       titulo: 'No encontré otro equipo tuyo',
       detalle: 'Abre Nexo en tu otro equipo (Mac o Windows), con Tailscale conectado y tu misma cuenta.',
@@ -279,6 +287,7 @@
   });
 
   onMount(() => {
+    recargar();
     leerDestinos(true);
     leerEstado();
     leerHistorial();
@@ -332,8 +341,10 @@
   <div class="columnas">
     <div class="columna">
       <!-- A quién se manda -->
-      {#if !drop.leidos}
+      {#if !drop.leidos || !perfil.leido}
         <div class="silueta-destino vidrio" aria-busy="true"><span class="solo-lector">Buscando tus equipos…</span></div>
+      {:else if sinEquipos}
+        <GuiaConexion compacta rustdesk={false} {onerror} />
       {:else}
         <section class="destino vidrio" aria-labelledby="drop-destino">
           <div class="ruta" class:viva={destino?.enLinea} class:apagada={!!destino && !destino.enLinea} aria-hidden="true">

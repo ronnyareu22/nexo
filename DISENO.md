@@ -65,6 +65,7 @@ src-tauri/src/
 | Ajustes del monitor por DDC/CI (contraste, modo de color, luz cálida, rojo/verde/azul, nitidez, modo de imagen, entrada, volumen, silencio, valores de fábrica), solo lo que el monitor dice que tiene | ⚠️ capacidades con el crate `ddc`, sin probar | ⚠️ `CapabilitiesRequestAndCapabilitiesReply`, sin probar |
 | Widget de brillo de una sola pantalla (`brillo-<id>`), desde la tarjeta de la pantalla o el submenú Brillo del ícono | ⚠️ escrito, sin probar | ⚠️ escrito y compilado con cargo-xwin, sin probar |
 | Pantalla virtual para RustDesk (segunda pantalla de la Mac, en otra ventana de RustDesk): Remoto, menú del ícono y Pantallas | ⚠️ CGVirtualDisplay comprobado con un script en macOS 26.6 (crear, cambiar de resolución, quitar); en la app, sin probar | ⚠️ la de la Mac, desde "Tu Mac" en Remoto (por XDrop): escrito y compilado con cargo-xwin, sin probar entre los dos equipos |
+| Perfil de trabajo remoto: Remoto se enciende solo al encontrar tu Mac (en Windows) o tu PC (en la Mac) en Tailscale; si no, la guía "Conecta tus equipos" (`sistema/equipos.rs`, `lib/perfil.svelte.ts`, `GuiaConexion.svelte`) | ⚠️ escrito, con pruebas (`cargo test --lib equipos bandeja`), sin probar en la app | ⚠️ escrito y compilado con cargo-xwin, sin probar |
 | Analítica: CPU, memoria, temperatura, batería, disco, red, apps que más gastan y sesión remota, de este equipo o del otro (`GET /nexo/analitica` por XDrop) | ⚠️ mach, sysctl, IOKit, NSProcessInfo, getifaddrs y libproc; escrito y compilado, sin probar en la app | ⚠️ kernel32 (sin temperatura ni red); escrito y compilado con cargo-xwin, sin probar |
 
 **Medidas actuales:** la app pesa 4,5 MB y el proceso principal usa unos 27 MB. Con el panel abierto se suman unos 70 MB del motor web, que se liberan al cerrar el panel.
@@ -225,7 +226,14 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
 5. **Remoto** (hecho el 3 nov; el dueño controla la Mac desde la PC del trabajo con RustDesk por Tailscale)
    - **Estado:** quién está conectado, si va directo por Tailscale o por relé, y el estado de Tailscale y RustDesk en fichas. A la izquierda, la ilustración del PC y la Mac con Tailscale al medio (`remoto-conectado`, `remoto` o `remoto-sin`, del mismo generador).
      - Mac: "Preparar para el trabajo" y "Abrir RustDesk".
-     - Windows: "Conectar a mi Mac" (`rustdesk --connect 100.88.188.99`).
+     - Windows: "Conectar a mi Mac" (`rustdesk --connect <la IP de tu Mac en Tailscale>`, la que encontró `equipos`).
+   - **Perfil de trabajo remoto** (4 nov; pedido del dueño: "eso de mac es para mí, pero debe ser como perfiles"). Nada personal queda fijo en el código.
+     - `sistema/equipos.rs` (`equipos_estado`): Tailscale ("activo", "detenido", "sin sesion" o "no instalado"), este equipo, tus otros equipos (con si Nexo responde en `GET /nexo/hola`, por la búsqueda de XDrop) y RustDesk (en la Mac, además, solo la línea `direct-server = 'Y'` de su configuración: el resto tiene claves y no se lee). Se recuerda 30 s (8 s con la guía a la vista); sin hilos propios.
+     - El otro equipo: en Windows una Mac tuya; en la Mac una PC con Windows tuya. Primero la que tiene Nexo, luego la que está en línea y si no, cualquiera. El último se guarda en `ajustes.json › equipos`: si duerme, el perfil sigue y se ve apagada.
+     - `ajustes.json › equipos.modo`: Automático (de fábrica), Siempre o Nunca, en Ajustes › Tus equipos, con lo encontrado y "Olvidar".
+     - Sin el perfil: Remoto muestra la guía "Conecta tus equipos" (Instala Tailscale · Conéctate · Agrega tu otro equipo · Abre Nexo allá · RustDesk; cada paso se revisa solo cada 10 s mientras se ve) y al lado lo que se activa. Con "Nunca", una nota que lleva a Ajustes. Con el perfil y algo pendiente en este equipo, la guía va arriba, chica, y se cierra.
+     - También: el menú del ícono esconde lo del remoto, Analítica muestra solo los equipos con Nexo (y el del perfil), XDrop muestra la guía chica si ningún equipo tiene Nexo, e Inicio una tarjeta discreta al pie que se cierra.
+     - Fuera de la app: `?perfil=nada`, `sesion`, `mitad`, `sinnexo`, `pendiente`, `apagada` o `nunca` (con `?plataforma=windows` o `mac`).
    - **Atajos de Windows en la Mac** (`sistema/remoto/teclado.rs`): Ctrl → ⌘, Inicio/Fin, Alt+Tab, escritorios.
      - Solo traduce lo que llega de RustDesk (el PID de origen del evento); el teclado de la Mac no cambia.
      - En Windows, `sistema/remoto_windows.rs` atrapa lo que Windows se guarda (Win+Tab, Win+D, Ctrl+Win+←/→, Win+Shift+S, Alt+Tab, Win+E) y lo manda por su código de tecla. Requiere el modo de teclado "Mapa" de RustDesk.
@@ -247,7 +255,7 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
      - Fuera de la app: `?plataforma=windows` muestra la interfaz de Windows; `&mac=apagada`, `sin`, `vieja` o `libre` cambian la Mac de ejemplo.
    - **Orden de la página** (rehecho el 4 nov: "sale montado todo"): estado · Tu Mac (Windows) o pantalla virtual (Mac) · atajos · captura, durante la sesión y portapapeles en dos columnas. Consultas de contenedor: una columna bajo 760 px y dos por encima; los atajos van en dos mitades desde 1000 px y, bajo 560 px, la acción arriba y las teclas debajo. Sin alturas fijas.
 5b. **Analítica** (4 nov; pedido del dueño: "modo analítica para ver el estado de la Mac", sobre todo desde el PC de la oficina). `vistas/Analitica.svelte`, `sistema/analitica.rs` (+ `analitica/mac.rs` y `win.rs`).
-   - Arriba, el selector del equipo ("Esta PC" / "Mi Mac · demo-sige"); de entrada, el otro equipo si responde. Debajo, si está en línea y a qué hora se actualizó.
+   - Arriba, el selector del equipo ("Esta PC" / "Mi Mac · demo-sige"), solo con los equipos que tienen Nexo y el del perfil; de entrada, el otro equipo si responde. Con este equipo solo, su nombre y el enlace "Conecta otro equipo para verlo aquí" (lleva a la guía de Remoto). Debajo, si está en línea y a qué hora se actualizó.
    - Seis tarjetas: CPU, memoria (con la presión) y red (bajada, subida y lo que pasa por Tailscale) con su tendencia de 5 minutos (`Tendencia.svelte`, SVG a mano, con lectura al pasar el mouse); temperatura en palabras (Normal, Tibia, Caliente, Muy caliente; el estado térmico de macOS y los grados de la batería), batería (ciclos y capacidad) y disco.
    - Las apps que más gastan (CPU y memoria, agrupadas por app; en la Mac solo las del usuario), la sesión remota (RustDesk, pantalla virtual, XDrop, "La Mac no se dormirá", modo trabajo) y el tiempo encendida.
    - Solo se mide mientras alguien mira: un hilo toma una muestra cada 2 s mientras el panel la pide (6 s por pedido) o el otro equipo (15 s por pedido), y se apaga solo.
@@ -266,6 +274,7 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - Tema.
    - Arranque al iniciar sesión.
    - Permisos: cuál tiene Nexo, cuál falta y un botón para abrirlo.
+   - Tus equipos: el trabajo remoto (Automático, Siempre o Nunca), qué equipo encontró Nexo y "Olvidar".
    - Privacidad del historial (borrarlo).
    - Acerca de.
 

@@ -1,9 +1,11 @@
 //! Menú del ícono (barra de menús en la Mac, bandeja en Windows): accesos rápidos que siempre están a mano.
 //!
 //! - Orden: captura y XDrop, escenas, sonido, brillo, aparatos, remoto y, al final, abrir, widget y salir.
-//!   En el remoto de la Mac va la casilla de la pantalla virtual para RustDesk.
+//!   En el remoto de la Mac va la casilla de la pantalla virtual para RustDesk. Lo del remoto solo aparece con el
+//!   perfil de trabajo remoto encendido (`equipos`: se encontró tu Mac o tu PC, o se eligió "Siempre").
 //! - Abrirlo no lee nada: se arma con lo que ya se sabe. Los aparatos los trae el vigía de lib.rs (cada 20 s) y
 //!   los destinos de XDrop son los de la última búsqueda (al arrancar, cada 2 min o cuando el panel los pide).
+//!   Esa búsqueda es la de `equipos`, que además guarda el otro equipo del perfil cuando aparece.
 //! - Se pone al día cuando cambia lo que muestra: en cada vuelta del vigía, tras cada acción del menú, al terminar
 //!   una escena, al cambiar el brillo con las teclas y cuando cambian los destinos de XDrop. Si solo cambian textos
 //!   o marcas, se cambian en su lugar; si cambian los elementos, se rehace esa parte.
@@ -11,7 +13,7 @@
 //!   y avisan cómo salieron con una notificación.
 //! - Sin atajos globales nuevos: en la Mac la captura ya tiene F13.
 
-use super::{ajustes, aviso, drop as xdrop, escenas, pantalla_virtual, remoto, teclas, widget, widget_brillo};
+use super::{ajustes, aviso, drop as xdrop, equipos, escenas, pantalla_virtual, remoto, teclas, widget, widget_brillo};
 use crate::dispositivos::audio::{self, Cambio, DispositivoAudio};
 use crate::dispositivos::historial::Historial;
 use crate::dispositivos::pantallas::{Pantalla, Pantallas};
@@ -152,7 +154,8 @@ pub fn al_vigilar(app: &AppHandle, aparatos: Option<(bool, Vec<Dispositivo>)>) {
     refrescar(app);
 }
 
-/// Busca los destinos de XDrop, una búsqueda a la vez. Si cambian, XDrop pide poner el menú al día.
+/// Busca los destinos de XDrop (y el otro equipo del perfil), una búsqueda a la vez. Si cambian, se pide poner el
+/// menú al día.
 fn buscar_destinos(app: &AppHandle) {
     if BUSCANDO.swap(true, Ordering::SeqCst) {
         return;
@@ -160,7 +163,7 @@ fn buscar_destinos(app: &AppHandle) {
     let a = app.clone();
     let hilo = std::thread::Builder::new().name("nexo-bandeja-xdrop".into()).spawn(move || {
         let _suelta = Suelta(&BUSCANDO);
-        xdrop::buscar_destinos(&a);
+        equipos::revisar(&a);
     });
     if hilo.is_err() {
         BUSCANDO.store(false, Ordering::SeqCst);
@@ -224,6 +227,8 @@ struct Datos {
     ocupados: Vec<(String, bool)>,
     /// Mac: la pantalla virtual para RustDesk existe (`None` si este macOS no deja crearla).
     pantalla_virtual: Option<bool>,
+    /// El perfil de trabajo remoto está encendido: "Preparar para el trabajo", la pantalla virtual o "Conectar a mi Mac".
+    remoto: bool,
 }
 
 impl Datos {
@@ -241,6 +246,7 @@ impl Datos {
             aparatos: None,
             ocupados: Vec::new(),
             pantalla_virtual: None,
+            remoto: false,
         }
     }
 
@@ -268,6 +274,7 @@ impl Datos {
             aparatos: bloquear(&APARATOS).clone(),
             ocupados: bloquear(&OCUPADOS).clone(),
             pantalla_virtual: pantalla_virtual::en_menu(),
+            remoto: equipos::perfil_activo(&guardados),
             ..Datos::vacios()
         }
     }
@@ -338,13 +345,13 @@ fn armar(d: &Datos) -> Vec<Pieza> {
         m.extend(aparatos);
     }
 
-    if d.mac {
+    if d.mac && d.remoto {
         m.push(Pieza::Raya);
         m.push(item("preparar", "Preparar para el trabajo"));
         if let Some(marcada) = d.pantalla_virtual {
             m.push(Pieza::Casilla { id: "pantalla-virtual".into(), texto: "Pantalla virtual para RustDesk".into(), marcada });
         }
-    } else if d.windows {
+    } else if d.windows && d.remoto {
         m.push(Pieza::Raya);
         m.push(item("conectar-mac", "Conectar a mi Mac"));
     }
@@ -644,7 +651,7 @@ async fn accion(app: AppHandle, id: String) {
         "preparar" => preparar(&app).await,
         "pantalla-virtual" => usar_pantalla_virtual(&app).await,
         "conectar-mac" => {
-            if let Err(e) = remoto::remoto_conectar_mac().await {
+            if let Err(e) = remoto::remoto_conectar_mac(app.clone()).await {
                 avisar(&app, "No se pudo conectar a tu Mac", &e);
             }
         }
@@ -952,6 +959,7 @@ mod pruebas {
             )),
             ocupados: Vec::new(),
             pantalla_virtual: Some(false),
+            remoto: true,
         }
     }
 
@@ -1016,12 +1024,29 @@ mod pruebas {
 
     #[test]
     fn bandeja_sin_destinos_ni_datos() {
-        let m = armar(&Datos { mac: true, windows: false, ..Datos::vacios() });
+        let m = armar(&Datos { mac: true, windows: false, remoto: true, ..Datos::vacios() });
         assert_eq!(
             ids(&m),
             ["captura", "carpeta-capturas", "carpeta-xdrop", "-", "escenas", "-", "preparar", "-", "abrir", "widget", "salir"]
         );
         assert!(matches!(&m[0], Pieza::Item { atajo: None, .. }));
+        // El primer menú, antes de leer los ajustes, sale sin lo del remoto.
+        assert!(!ids(&armar(&Datos { mac: true, windows: false, ..Datos::vacios() })).iter().any(|i| i == "preparar"));
+    }
+
+    #[test]
+    fn bandeja_sin_perfil_remoto() {
+        // Mac sin tu PC: ni "Preparar para el trabajo" ni la pantalla virtual, y sin raya de más.
+        let m = armar(&Datos { remoto: false, ..mac_completa() });
+        let lista = ids(&m);
+        assert!(!lista.iter().any(|i| i == "preparar" || i == "pantalla-virtual"));
+        assert!(!lista.windows(2).any(|par| par[0] == "-" && par[1] == "-"));
+        assert_eq!(&lista[lista.len() - 5..], ["bt:0:E8-9E", "-", "abrir", "widget", "salir"]);
+        // Windows sin tu Mac: sin "Conectar a mi Mac".
+        let m = armar(&Datos { mac: false, windows: true, remoto: false, ..mac_completa() });
+        assert!(!ids(&m).iter().any(|i| i == "conectar-mac"));
+        // Encenderlo cambia la forma del menú: esa parte se rehace.
+        assert!(!misma_forma(&m, &armar(&Datos { mac: false, windows: true, ..mac_completa() })));
     }
 
     #[test]

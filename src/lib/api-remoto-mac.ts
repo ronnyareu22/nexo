@@ -1,18 +1,25 @@
 // Llamadas a Rust para manejar la Mac desde Nexo en Windows, por XDrop (sistema/remoto/mando.rs): su pantalla
-// virtual, las opciones de la sesión y el modo trabajo. La Mac se elige sola entre los destinos de XDrop.
+// virtual, las opciones de la sesión y el modo trabajo. La Mac es la del perfil (perfil.svelte.ts): la que encontró
+// Nexo entre tus equipos de Tailscale o, si duerme, la que recuerda.
 // Fuera de la app usa una Mac de ejemplo: `?mac=apagada` no responde, `?mac=sin` no aparece en Tailscale,
 // `?mac=vieja` tiene una versión anterior de Nexo y `?mac=libre` está sin sesión ni pantalla virtual.
 import { invoke } from '@tauri-apps/api/core';
-import { leerDestinosDrop } from './api-sistema';
-import type { CambioMac, DestinoDrop, EstadoMac } from './tipos-sistema';
+import type { CambioMac, DestinoDrop, EstadoMac, OtroEquipo } from './tipos-sistema';
 
 const enApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-/** Tu Mac entre tus equipos de Tailscale: la primera donde Nexo responde o, si ninguna, la primera que haya. */
-export async function buscarMac(): Promise<DestinoDrop | null> {
+/** Tu Mac, a partir del otro equipo del perfil. `enLinea`: Nexo respondió allá en la última búsqueda. */
+export function macDelPerfil(otro: OtroEquipo | null): DestinoDrop | null {
   if (!enApp && prueba === 'sin') return null;
-  const macs = (await leerDestinosDrop()).filter((d) => d.plataforma === 'mac');
-  return macs.find((d) => d.enLinea) ?? macs[0] ?? null;
+  if (!otro || otro.plataforma !== 'mac') return null;
+  return {
+    nombre: otro.nombre,
+    ip: otro.ip,
+    plataforma: 'mac',
+    enLinea: otro.nexo,
+    tailscaleEnLinea: otro.enLinea,
+    version: null,
+  };
 }
 
 /** Cómo está la Mac: su pantalla virtual, la sesión de RustDesk, el modo trabajo y el reposo. */

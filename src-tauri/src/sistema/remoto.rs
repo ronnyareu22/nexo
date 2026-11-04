@@ -12,7 +12,7 @@
 //!
 //! En Windows: abre RustDesk conectado a la Mac y, con la sesión al frente, manda a la Mac los atajos que
 //! Windows se guarda (Win+Tab, Win+D, Ctrl+Win+←/→, Win+Shift+S, Alt+Tab, Win+E): ver `remoto_windows`.
-//! La traducción de Ctrl → ⌘ la hace la Mac.
+//! La traducción de Ctrl → ⌘ la hace la Mac. La Mac es la que encontró `equipos` entre tus equipos de Tailscale.
 
 // XDrop (sistema/drop) también usa Tailscale, las imágenes, el portapapeles y la captura.
 pub(super) mod tailscale;
@@ -41,8 +41,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
-/// La Mac de la casa en Tailscale: a ella se conecta el PC del trabajo.
-pub const IP_MAC: &str = "100.88.188.99";
+/// Windows sin una Mac encontrada: qué decir al pedir "Conectar a mi Mac".
+#[cfg(windows)]
+const SIN_MAC: &str = "Todavía no encontré tu Mac en Tailscale. En Remoto te muestro cómo conectar tus equipos.";
 
 /// Lo que se guarda en ajustes.json, dentro de "remoto". Todo viene encendido.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -156,7 +157,7 @@ const ATAJOS: &[Atajo] = &[
 pub struct EstadoRemoto {
     #[serde(flatten)]
     pub sesion: Sesion,
-    /// "activo", "detenido" o "no instalado".
+    /// "activo", "detenido", "sin sesion" o "no instalado".
     pub tailscale: &'static str,
     /// Mac: RustDesk está abierto. Windows: está instalado.
     pub rustdesk: bool,
@@ -170,7 +171,9 @@ pub struct EstadoRemoto {
     pub permiso_pantalla: bool,
     /// La app aparte "Captura remota" sigue abierta (Nexo ya hace lo mismo).
     pub captura_remota_abierta: bool,
-    pub ip_mac: &'static str,
+    /// La dirección de Tailscale de la Mac (la que se escribe en RustDesk): en la Mac, la suya; en Windows, la de la
+    /// Mac encontrada (`equipos`). `None` si todavía no se sabe.
+    pub ip_mac: Option<String>,
 }
 
 /// Una captura hecha con F13 o con "Probar captura".
@@ -296,9 +299,15 @@ fn ejecutar(programa: &Path, args: &[&str], limite: Duration) -> Option<Vec<u8>>
 
 fn estado(app: &AppHandle) -> EstadoRemoto {
     let (rustdesk, rustdesk_instalado, captura_remota_abierta) = programas();
+    let info = tailscale::leer(Duration::from_secs(20));
+    let ip_mac = if cfg!(target_os = "macos") {
+        info.propio.as_ref().and_then(|p| p.ipv4()).map(|ip| ip.to_string())
+    } else {
+        ajustes::cargar(app).equipos.otro.filter(|o| o.plataforma == "mac").map(|o| o.ip)
+    };
     EstadoRemoto {
         sesion: sesion_actual(),
-        tailscale: tailscale::leer(Duration::from_secs(20)).estado,
+        tailscale: info.estado,
         rustdesk,
         rustdesk_instalado,
         ajustes: ajustes::cargar(app).remoto,
@@ -307,7 +316,7 @@ fn estado(app: &AppHandle) -> EstadoRemoto {
         permiso_teclas: super::teclas::permiso_concedido(),
         permiso_pantalla: pantalla_permitida(),
         captura_remota_abierta,
-        ip_mac: IP_MAC,
+        ip_mac,
     }
 }
 
@@ -315,10 +324,29 @@ fn estado(app: &AppHandle) -> EstadoRemoto {
 #[cfg(target_os = "macos")]
 fn programas() -> (bool, bool, bool) {
     let l = procesos::leer();
-    let instalado = l.rustdesk
-        || Path::new("/Applications/RustDesk.app").exists()
-        || std::env::var_os("HOME").is_some_and(|h| Path::new(&h).join("Applications/RustDesk.app").exists());
-    (l.rustdesk, instalado, l.captura_remota)
+    (l.rustdesk, l.rustdesk || rustdesk_en_aplicaciones(), l.captura_remota)
+}
+
+#[cfg(target_os = "macos")]
+fn rustdesk_en_aplicaciones() -> bool {
+    Path::new("/Applications/RustDesk.app").exists()
+        || std::env::var_os("HOME").is_some_and(|h| Path::new(&h).join("Applications/RustDesk.app").exists())
+}
+
+/// Si RustDesk está instalado en este equipo (lo usa la guía de `equipos`).
+#[cfg(target_os = "macos")]
+pub fn rustdesk_instalado() -> bool {
+    rustdesk_en_aplicaciones() || procesos::leer().rustdesk
+}
+
+#[cfg(windows)]
+pub fn rustdesk_instalado() -> bool {
+    win::rustdesk().is_some()
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn rustdesk_instalado() -> bool {
+    false
 }
 
 #[cfg(windows)]
@@ -468,18 +496,22 @@ pub async fn remoto_abrir_rustdesk() -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Windows: abre RustDesk ya conectándose a la Mac por Tailscale.
+/// Windows: abre RustDesk ya conectándose a tu Mac por Tailscale (la que encontró `equipos`).
 #[tauri::command]
-pub async fn remoto_conectar_mac() -> Result<(), String> {
+pub async fn remoto_conectar_mac(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
-        tauri::async_runtime::spawn_blocking(|| win::abrir_rustdesk(&["--connect", IP_MAC]))
-            .await
-            .map_err(|e| e.to_string())?
+        tauri::async_runtime::spawn_blocking(move || {
+            let (_, ip) = super::equipos::mac(&app).ok_or(SIN_MAC)?;
+            win::abrir_rustdesk(&["--connect", ip.as_str()])
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
     #[cfg(not(windows))]
     {
-        Err("Esto se usa desde el PC con Windows.".into())
+        let _ = app;
+        Err("Esto se usa desde la PC con Windows.".into())
     }
 }
 
@@ -847,7 +879,7 @@ mod win {
         Some(PathBuf::from(ruta.trim_matches('"'))).filter(|p| p.is_file())
     }
 
-    /// Abre RustDesk con esos argumentos (por ejemplo `--connect 100.88.188.99`).
+    /// Abre RustDesk con esos argumentos (por ejemplo `--connect 100.64.0.2`).
     pub fn abrir_rustdesk(args: &[&str]) -> Result<(), String> {
         let ruta = rustdesk().ok_or("No encontré RustDesk en este PC. Instálalo desde rustdesk.com.")?;
         std::process::Command::new(ruta)

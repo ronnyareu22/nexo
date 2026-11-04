@@ -382,13 +382,13 @@
             {:else if seccion === 'remoto'}
               <VistaRemoto onir={ir} onerror={mostrarAviso} />
             {:else if seccion === 'analitica'}
-              <VistaAnalitica />
+              <VistaAnalitica onir={ir} />
             {:else if seccion === 'drop'}
               <VistaDrop onerror={mostrarAviso} />
             {:else if seccion === 'automatizaciones'}
               <VistaAutomatizaciones dispositivos={estado?.dispositivos ?? []} onerror={mostrarAviso} />
             {:else if seccion === 'ajustes'}
-              <VistaAjustes {nombre} onnombre={(n) => (nombre = n)} onerror={mostrarAviso} />
+              <VistaAjustes {nombre} onnombre={(n) => (nombre = n)} onerror={mostrarAviso} onir={ir} />
             {/if}
           </div>
         {/key}

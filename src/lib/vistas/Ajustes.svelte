@@ -1,4 +1,5 @@
-<!-- Ajustes: apariencia, tu nombre, arranque, widget de escritorio, permisos, historial y "Acerca de", en filas como los
+<!-- Ajustes: apariencia, tu nombre, arranque, widget de escritorio, permisos, tus equipos (el trabajo remoto:
+     Automático, Siempre o Nunca, y qué equipo encontró Nexo), historial y "Acerca de", en filas como los
      Ajustes del Sistema. Mientras falte un permiso, se revisa cada 3 s para mostrar cuando ya está. -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -13,7 +14,10 @@
     usarArranque,
     usarWidget,
   } from '$lib/api-sistema';
-  import type { Permisos, SeccionPrivacidad } from '$lib/tipos-sistema';
+  import type { ModoRemoto, Permisos, SeccionPrivacidad } from '$lib/tipos-sistema';
+  import { olvidarOtroEquipo, ponerModoRemoto } from '$lib/api-equipos';
+  import { nombreTipo, perfil, ponerPerfil, recargar } from '$lib/perfil.svelte';
+  import MenuDesplegable from '$lib/componentes/MenuDesplegable.svelte';
   import Icono from '$lib/componentes/Icono.svelte';
   import Interruptor from '$lib/componentes/Interruptor.svelte';
   import SelectorTema from '$lib/componentes/SelectorTema.svelte';
@@ -25,13 +29,87 @@
     nombre = '',
     onnombre,
     onerror,
+    onir,
   }: {
     /** El nombre con que Nexo saluda en Inicio. */
     nombre?: string;
     /** Se guardó un nombre nuevo (para que Inicio salude con él). */
     onnombre?: (nombre: string) => void;
     onerror: (texto: string) => void;
+    /** Lleva a otra sección (la guía para conectar tus equipos, en Remoto). */
+    onir?: (seccion: string) => void;
   } = $props();
+
+  // --- Tus equipos: el trabajo remoto ---
+  // Lo que busca este equipo: en Windows tu Mac; en la Mac tu PC.
+  const buscado = esMac ? 'PC' : 'Mac';
+  const opcionesRemoto: { valor: ModoRemoto; nombre: string; detalle: string }[] = [
+    { valor: 'auto', nombre: 'Automático', detalle: 'Según tus equipos' },
+    { valor: 'siempre', nombre: 'Siempre', detalle: `Aunque no encuentre tu ${buscado}` },
+    { valor: 'nunca', nombre: 'Nunca', detalle: 'Oculta el trabajo remoto' },
+  ];
+  let cambiandoModo = $state(false);
+  let preguntandoOlvidar = $state(false);
+  /** Se olvidó, pero sigue en Tailscale y se volvió a encontrar. */
+  let volvio = $state(false);
+
+  async function cambiarModo(valor: string) {
+    if (cambiandoModo) return;
+    cambiandoModo = true;
+    try {
+      ponerPerfil(await ponerModoRemoto(valor as ModoRemoto));
+    } catch (e) {
+      onerror(String(e));
+    }
+    cambiandoModo = false;
+  }
+
+  async function olvidar() {
+    preguntandoOlvidar = false;
+    try {
+      const e = await olvidarOtroEquipo();
+      ponerPerfil(e);
+      volvio = !!e.otro;
+    } catch (err) {
+      onerror(String(err));
+    }
+  }
+
+  const detectado = $derived.by((): { titulo: string; detalle: string; tono: 'ok' | 'apagado' } | null => {
+    const e = perfil.estado;
+    if (!e) return null;
+    const o = e.otro;
+    if (o) {
+      const tipo = nombreTipo(o.plataforma);
+      if (volvio)
+        return {
+          titulo: `Encontré tu ${tipo} ${o.nombre}`,
+          detalle: 'Sigue en tu cuenta de Tailscale, así que la volví a encontrar. Para no usarla, elige Nunca.',
+          tono: o.nexo ? 'ok' : 'apagado',
+        };
+      if (!o.encontrado)
+        return {
+          titulo: `Recuerdo tu ${tipo} ${o.nombre}`,
+          detalle: 'Ahora no aparece en Tailscale. El trabajo remoto sigue listo para cuando vuelva.',
+          tono: 'apagado',
+        };
+      return {
+        titulo: `Encontré tu ${tipo} ${o.nombre}`,
+        detalle: o.nexo ? 'En línea, con Nexo abierto.' : 'Ahora no responde: puede estar apagada o con Nexo cerrado.',
+        tono: o.nexo ? 'ok' : 'apagado',
+      };
+    }
+    return {
+      titulo: 'No encontré otro equipo tuyo en Tailscale',
+      detalle:
+        e.tailscale === 'no instalado'
+          ? 'Instala Tailscale en tus dos equipos con la misma cuenta.'
+          : e.tailscale !== 'activo'
+            ? 'Conecta Tailscale en este equipo para buscar tu ' + buscado + '.'
+            : `Cuando aparezca tu ${buscado}, el trabajo remoto se enciende solo.`,
+      tono: 'apagado',
+    };
+  });
 
   const VERSION = '0.1.0';
 
@@ -178,6 +256,7 @@
   }
 
   onMount(() => {
+    recargar();
     leerArranque()
       .then((a) => (arranque = a))
       .catch((e) => onerror(String(e)));
@@ -309,6 +388,49 @@
     </div>
 
     <div class="columna">
+      <section class="panel vidrio" aria-labelledby="ajustes-equipos">
+        <h2 class="rotulo" id="ajustes-equipos">Tus equipos</h2>
+        <div class="fila con-menu">
+          <div class="textos">
+            <div class="titulo">Trabajo remoto</div>
+            <div class="ayuda">
+              {esMac
+                ? 'Tus atajos de Windows en esta Mac, la captura con Imprimir Pantalla y la pantalla virtual.'
+                : 'Conectarte a tu Mac con un clic, su pantalla virtual y tus atajos de Windows en ella.'}
+            </div>
+          </div>
+          <div class="menu" aria-busy={cambiandoModo}>
+            <MenuDesplegable
+              opciones={opcionesRemoto}
+              valor={perfil.estado?.modo ?? 'auto'}
+              etiqueta="Cuándo se activa el trabajo remoto"
+              oncambio={cambiarModo}
+            />
+          </div>
+        </div>
+        {#if detectado}
+          <div class="fila">
+            <div class="textos">
+              <div class="titulo con-punto">
+                <span class="punto-estado {detectado.tono}" aria-hidden="true"></span>
+                <span>{detectado.titulo}</span>
+              </div>
+              <div class="ayuda">{detectado.detalle}</div>
+            </div>
+            {#if perfil.otro}
+              <button class="boton-vidrio boton" type="button" onclick={() => (preguntandoOlvidar = true)}>
+                Olvidar
+              </button>
+            {:else if onir}
+              {@const ir = onir}
+              <button class="boton-vidrio boton" type="button" onclick={() => ir('remoto')}>Ver la guía</button>
+            {/if}
+          </div>
+        {:else}
+          <div class="fila cargando" aria-busy="true"><span class="linea"></span><span class="solo-lector">Buscando tus equipos…</span></div>
+        {/if}
+      </section>
+
       <section class="panel vidrio" aria-labelledby="ajustes-historial">
         <h2 class="rotulo" id="ajustes-historial">Historial</h2>
         <div class="fila">
@@ -377,6 +499,17 @@
     <p class="error-campo" id="ajustes-error-nombre" role="alert">{errorNombre}</p>
   {/if}
 </Dialogo>
+
+<Dialogo
+  abierto={preguntandoOlvidar}
+  titulo={perfil.otro ? `¿Olvidar tu ${nombreTipo(perfil.otro.plataforma)} ${perfil.otro.nombre}?` : '¿Olvidar este equipo?'}
+  descripcion="Nexo deja de recordarla para el trabajo remoto. Si sigue en tu cuenta de Tailscale, la vuelve a encontrar."
+  icono="papelera"
+  textoConfirmar="Olvidar"
+  textoCancelar="Cancelar"
+  onconfirmar={olvidar}
+  oncancelar={() => (preguntandoOlvidar = false)}
+/>
 
 <Dialogo
   abierto={preguntando}
@@ -519,6 +652,34 @@
   .acerca {
     justify-content: flex-start;
     gap: 14px;
+  }
+
+  /* El modo del trabajo remoto: si el menú no cabe al lado del texto, baja a su propia línea. */
+  .fila.con-menu {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .con-menu .textos {
+    flex: 1 1 220px;
+  }
+  .menu {
+    flex: 0 1 220px;
+    min-width: 170px;
+  }
+  .con-punto {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .punto-estado {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--texto-3);
+  }
+  .punto-estado.ok {
+    background: var(--exito);
   }
   .version {
     margin-left: 4px;

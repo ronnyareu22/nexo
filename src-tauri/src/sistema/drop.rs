@@ -93,7 +93,7 @@ pub struct EstadoDrop {
     pub plataforma: &'static str,
     /// Dónde queda lo recibido.
     pub carpeta: Option<String>,
-    /// "activo", "detenido" o "no instalado".
+    /// "activo", "detenido", "sin sesion" o "no instalado".
     pub tailscale: &'static str,
     pub puerto: u16,
 }
@@ -256,6 +256,12 @@ fn enlace_recibido(app: &AppHandle, equipo: &str, url: &str) -> Result<(), Strin
     }
     notificar(app, format!("Se abrió un enlace de {equipo}"));
     Ok(())
+}
+
+/// Abre un enlace (http o https) en el navegador de este equipo. Lo usa también la guía de `equipos`.
+pub fn abrir_en_navegador(url: &str) -> Result<(), String> {
+    let url = enlace_valido(url).ok_or("Ese enlace no se puede abrir.")?;
+    plataforma::abrir_enlace(&url)
 }
 
 /// Un enlace que se puede abrir: http o https, sin espacios ni caracteres de control, hasta 4096.

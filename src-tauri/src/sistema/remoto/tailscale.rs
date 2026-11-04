@@ -33,7 +33,7 @@ impl Nodo {
 
 #[derive(Clone, Debug)]
 pub struct Info {
-    /// "activo", "detenido" o "no instalado".
+    /// "activo", "detenido", "sin sesion" (falta entrar con la cuenta) o "no instalado".
     pub estado: &'static str,
     /// (dirección, nombre) de cada equipo de la red.
     nombres: Vec<(String, String)>,
@@ -123,11 +123,46 @@ pub fn programa() -> Option<PathBuf> {
     candidatos.into_iter().find(|p| p.is_file())
 }
 
-/// Mac: si Tailscale quedó desconectado, `tailscale up` lo vuelve a conectar (espera hasta 8 s).
-#[cfg(target_os = "macos")]
+/// Si Tailscale quedó desconectado, `tailscale up` lo vuelve a conectar (espera hasta 8 s).
 pub fn conectar() {
     if let Some(p) = programa() {
         let _ = super::ejecutar(&p, &["up"], Duration::from_secs(8));
+    }
+}
+
+/// Abre la app de Tailscale (su ícono de la barra de menús o de la bandeja), donde se entra con la cuenta. No espera.
+pub fn abrir() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::{Command, Stdio};
+        let abierta = Command::new("/usr/bin/open")
+            .args(["-a", "Tailscale"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if abierta { Ok(()) } else { Err("No encontré Tailscale en Aplicaciones. Descárgalo desde tailscale.com.".into()) }
+    }
+    #[cfg(windows)]
+    {
+        use std::process::{Command, Stdio};
+        // La app de la bandeja va junto al programa de línea de comandos.
+        let app = programa()
+            .and_then(|p| p.parent().map(|c| c.join("tailscale-ipn.exe")))
+            .filter(|p| p.is_file())
+            .ok_or("No encontré Tailscale en esta PC. Descárgalo desde tailscale.com.")?;
+        Command::new(app)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("No pude abrir Tailscale ({e})."))
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        Err("Abre Tailscale desde tu sistema.".into())
     }
 }
 
@@ -135,6 +170,7 @@ fn analizar(json: &[u8]) -> Option<Info> {
     let v: serde_json::Value = serde_json::from_slice(json).ok()?;
     let estado = match v.get("BackendState")?.as_str()? {
         "Running" => "activo",
+        "NeedsLogin" => "sin sesion",
         _ => "detenido",
     };
     let mut nombres = Vec::new();

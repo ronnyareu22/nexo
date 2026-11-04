@@ -85,7 +85,8 @@ export interface AtajoRemoto {
   accion: string;
 }
 
-export type EstadoTailscale = 'activo' | 'detenido' | 'no instalado';
+/** "sin sesion": Tailscale está, pero falta entrar con la cuenta. */
+export type EstadoTailscale = 'activo' | 'detenido' | 'sin sesion' | 'no instalado';
 
 /** `pantalla_virtual_estado`: la segunda pantalla de la Mac para verla en otra ventana de RustDesk. */
 export interface EstadoPantallaVirtual {
@@ -153,8 +154,9 @@ export interface EstadoRemoto {
   permisoPantalla: boolean;
   /** La app aparte "Captura remota" sigue abierta (Nexo ya hace lo mismo). */
   capturaRemotaAbierta: boolean;
-  /** La dirección de la Mac en Tailscale (la que se escribe en RustDesk). */
-  ipMac: string;
+  /** La dirección de la Mac en Tailscale (la que se escribe en RustDesk): en la Mac, la suya; en Windows, la de la Mac
+   *  encontrada. null si todavía no se sabe. */
+  ipMac: string | null;
 }
 
 /** Una captura liviana ya copiada. */
@@ -331,3 +333,51 @@ export interface CambioBrillo {
   id: number;
   nivel: number;
 }
+
+// --- Tus equipos y el perfil de trabajo remoto (`sistema/equipos.rs`) ---
+
+/** Automático (se enciende al encontrar tu Mac o tu PC), Siempre o Nunca. */
+export type ModoRemoto = 'auto' | 'siempre' | 'nunca';
+
+/** "otro": teléfonos, tabletas y lo que no sea una computadora. */
+export type PlataformaTailscale = 'mac' | 'windows' | 'linux' | 'otro';
+
+/** Otro equipo tuyo en Tailscale. */
+export interface EquipoTailscale {
+  nombre: string;
+  ip: string;
+  plataforma: PlataformaTailscale;
+  /** Tailscale lo ve conectado. */
+  enLinea: boolean;
+  /** Nexo respondió allá. */
+  nexo: boolean;
+}
+
+/** El otro equipo del perfil: tu Mac (en Windows) o tu PC (en la Mac). */
+export interface OtroEquipo {
+  nombre: string;
+  ip: string;
+  plataforma: PlataformaTailscale;
+  enLinea: boolean;
+  nexo: boolean;
+  /** Está ahora entre tus equipos de Tailscale (si no, es el que se recuerda). */
+  encontrado: boolean;
+  /** Nexo respondió allá alguna vez. */
+  conNexo: boolean;
+}
+
+/** `equipos_estado`: Tailscale, este equipo, tus otros equipos, el perfil y RustDesk. */
+export interface EstadoEquipos {
+  tailscale: EstadoTailscale;
+  propio: { nombre: string; ip: string | null; plataforma: PlataformaEquipo };
+  equipos: EquipoTailscale[];
+  otro: OtroEquipo | null;
+  modo: ModoRemoto;
+  /** El perfil de trabajo remoto está encendido. */
+  activo: boolean;
+  /** `accesoDirecto`: Mac, el acceso directo por IP de RustDesk; en Windows, null. */
+  rustdesk: { instalado: boolean; accesoDirecto: boolean | null };
+}
+
+/** Las descargas que abre la guía. */
+export type Descarga = 'tailscale' | 'nexo' | 'rustdesk';

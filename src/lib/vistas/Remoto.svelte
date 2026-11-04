@@ -9,13 +9,21 @@
   4. En la Mac, una rejilla de dos columnas: la captura y la comodidad durante la sesión a la izquierda y el
      portapapeles a la derecha. En Windows queda solo la captura, a lo ancho.
   Todo se acomoda con consultas de contenedor: una columna bajo unos 760 px y dos por encima. Sin alturas fijas.
+  Solo con el perfil de trabajo remoto encendido (perfil.svelte.ts: Nexo encontró tu Mac o tu PC, o "Siempre" en
+  Ajustes). Si no, la guía "Conecta tus equipos" es lo principal, con lo que se activa al lado; con "Nunca", una
+  nota que lleva a Ajustes. Encendido, si falta algo en este equipo (Tailscale o RustDesk), la guía va arriba, chica.
   En Windows solo se conecta: la traducción, la captura y el portapapeles los hace Nexo en la Mac.
   Se relee al llegar "remoto-cambio" y cada 5 s mientras se ve; la Mac desde Windows, cada 10 s; el historial,
   al llegar "portapapeles-cambio".
   Superficies sólidas, el hover solo cambia el color y ningún texto se corta: todo baja de línea.
 -->
+<script lang="ts" module>
+  // Si se cerró la guía de arriba, no vuelve mientras el panel siga abierto.
+  let guiaCerrada = false;
+</script>
+
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import {
     abrirAjustesPrivacidad,
     abrirCapturas,
@@ -55,7 +63,9 @@
     resolucionDe,
     usarPantallaVirtual,
   } from '$lib/api-pantalla-virtual';
-  import { ajustarMac, buscarMac, leerMac, usarPantallaVirtualMac } from '$lib/api-remoto-mac';
+  import { ajustarMac, leerMac, macDelPerfil, usarPantallaVirtualMac } from '$lib/api-remoto-mac';
+  import { perfil, recargar } from '$lib/perfil.svelte';
+  import GuiaConexion from '$lib/componentes/GuiaConexion.svelte';
   import type { EstadoPantallaVirtual } from '$lib/tipos-sistema';
   import Icono, { type Nombre } from '$lib/componentes/Icono.svelte';
   import Interruptor from '$lib/componentes/Interruptor.svelte';
@@ -75,12 +85,54 @@
   let remoto = $state<EstadoRemoto | null>(null);
   let historial = $state<EntradaPortapapeles[] | null>(null);
 
+  // --- Perfil de trabajo remoto ---
+  /** El nombre de tu Mac en Tailscale (en Windows), para los textos. */
+  const nombreMac = $derived(perfil.otro?.plataforma === 'mac' ? perfil.otro.nombre : 'tu Mac');
+  // Falta algo en este equipo (Tailscale o RustDesk; en la Mac, también el acceso directo por IP).
+  const faltaAqui = $derived.by(() => {
+    const e = perfil.estado;
+    if (!e) return false;
+    const rd = esMac ? e.rustdesk.instalado && e.rustdesk.accesoDirecto === true : e.rustdesk.instalado;
+    return e.tailscale !== 'activo' || !rd;
+  });
+  // Con el perfil encendido, la guía va arriba si falta algo aquí o si se estaba viendo cuando apareció tu equipo.
+  let vioGuia = false;
+  let guiaArriba = $state(false);
+  $effect(() => {
+    if (perfil.leido && !perfil.activo) vioGuia = true;
+    if (perfil.activo && (faltaAqui || vioGuia) && !guiaCerrada) guiaArriba = true;
+  });
+  function cerrarGuia() {
+    guiaCerrada = true;
+    guiaArriba = false;
+  }
+  // Al encenderse el perfil (o al llegar la primera lectura), lo del remoto se lee enseguida.
+  $effect(() => {
+    if (!perfil.activo) return;
+    untrack(() => {
+      leer();
+      leerVirtual();
+      leerTuMac();
+    });
+  });
+  const desbloquea: { icono: Nombre; texto: string }[] = esMac
+    ? [
+        { icono: 'teclado', texto: 'Tus atajos de Windows, traducidos en esta Mac' },
+        { icono: 'captura', texto: 'Capturas con Imprimir Pantalla, listas para pegar' },
+        { icono: 'pantallas', texto: 'Una segunda pantalla para verla en RustDesk' },
+      ]
+    : [
+        { icono: 'conectar', texto: 'Conectarte a tu Mac con un clic' },
+        { icono: 'pantallas', texto: 'Encender su pantalla virtual desde aquí' },
+        { icono: 'teclado', texto: 'Usar tus atajos de Windows en la Mac' },
+      ];
+
   // --- Lectura ---
   // Cada cambio de ajuste sube la versión: una lectura que empezó antes no pisa lo recién elegido.
   let version = 0;
   let leyendo = false;
   async function leer() {
-    if (leyendo) return;
+    if (leyendo || (perfil.leido && !perfil.activo)) return;
     leyendo = true;
     const desde = version;
     try {
@@ -183,15 +235,16 @@
   let ocupadoMac = $state<ClaveMac | null>(null);
   let versionMac = 0;
 
-  // La Mac se busca entre los destinos de XDrop la primera vez, si no apareció y cada vez que no respondió.
+  // La Mac es la del perfil. Se vuelve a buscar la primera vez, si no apareció y cada vez que no respondió.
   async function leerTuMac() {
-    if (esMac || buscandoMac || ocupadoMac) return;
+    if (esMac || buscandoMac || ocupadoMac || !perfil.activo) return;
     buscandoMac = true;
     const desde = versionMac;
     try {
       let d = destinoMac;
       if (!d || errorMac) {
-        d = await buscarMac();
+        await recargar(true);
+        d = macDelPerfil(perfil.otro);
         destinoMac = d;
       }
       if (!d) {
@@ -261,13 +314,17 @@
           ? 'Instala RustDesk desde rustdesk.com y vuelve aquí: el botón se activa solo.'
           : r.tailscale !== 'activo'
             ? 'Enciende Tailscale en esta PC para llegar directo a tu Mac.'
-            : `Abre RustDesk conectado directo a tu Mac por Tailscale (${r.ipMac}).`,
-        tono: r.rustdesk && r.tailscale === 'activo' ? 'ok' : 'apagado',
+            : !r.ipMac
+              ? 'Todavía no encontré tu Mac en Tailscale. Revisa que esté encendida y con tu misma cuenta.'
+              : `Abre RustDesk conectado directo a ${nombreMac} por Tailscale (${r.ipMac}).`,
+        tono: r.rustdesk && r.tailscale === 'activo' && r.ipMac ? 'ok' : 'apagado',
       };
     if (r.activa && r.rele)
       return {
         titulo: 'Conectado por el servidor de RustDesk',
-        detalle: `Va más lento. Para ir directo, en RustDesk escribe ${r.ipMac} en lugar del ID.`,
+        detalle: r.ipMac
+          ? `Va más lento. Para ir directo, en RustDesk escribe ${r.ipMac} en lugar del ID.`
+          : 'Va más lento. Para ir directo, conecta Tailscale en esta Mac y entra con su dirección en lugar del ID.',
         tono: 'aviso',
       };
     if (r.activa)
@@ -281,7 +338,9 @@
     return {
       titulo: 'Sin sesión remota',
       detalle: r.modoTrabajo
-        ? `Lista para el trabajo. Desde el PC, en RustDesk escribe ${r.ipMac}.`
+        ? r.ipMac
+          ? `Lista para el trabajo. Desde tu PC, en RustDesk escribe ${r.ipMac}.`
+          : 'Lista para el trabajo. Conecta Tailscale para entrar directo desde tu PC.'
         : 'Cuando te conectes desde el trabajo, lo verás aquí.',
       tono: 'apagado',
     };
@@ -309,6 +368,7 @@
     const tailscale: Record<EstadoRemoto['tailscale'], [string, Tono]> = {
       activo: ['Conectado', 'ok'],
       detenido: ['Detenido', 'aviso'],
+      'sin sesion': ['Sin sesión', 'aviso'],
       'no instalado': ['No instalado', 'apagado'],
     };
     const [valorTs, tonoTs] = tailscale[r.tailscale];
@@ -321,6 +381,8 @@
       });
       const despierta = r.ajustes.evitarReposo && (r.activa || r.modoTrabajo);
       lista.push({ nombre: 'Reposo', valor: despierta ? 'La Mac no se dormirá' : 'Normal', tono: despierta ? 'ok' : 'apagado' });
+      const pc = perfil.otro;
+      if (pc) lista.push({ nombre: 'Tu PC', valor: pc.nombre, tono: pc.nexo ? 'ok' : 'apagado' });
     } else {
       lista.push({ nombre: 'RustDesk', valor: r.rustdesk ? 'Instalado' : 'No instalado', tono: r.rustdesk ? 'ok' : 'aviso' });
     }
@@ -543,6 +605,7 @@
   }
 
   onMount(() => {
+    recargar();
     leer();
     leerHistorial();
     leerVirtual();
@@ -641,8 +704,49 @@
     </p>
   </header>
 
-  {#if remoto && resumen}
+  {#if perfil.leido && !perfil.activo}
+    {#if perfil.estado?.modo === 'nunca'}
+      <!-- Apagado a propósito en Ajustes: una nota calma, sin la guía. -->
+      <section class="apagado vidrio" aria-labelledby="remoto-apagado">
+        <span class="ficha-icono tenue"><Icono nombre="remoto" tamano={20} /></span>
+        <div class="textos">
+          <h2 class="titulo-panel" id="remoto-apagado">El trabajo remoto está apagado</h2>
+          <p class="ayuda">Lo apagaste en Ajustes. Enciéndelo ahí cuando quieras usarlo de nuevo.</p>
+        </div>
+        {#if onir}
+          {@const ir = onir}
+          <button class="boton-vidrio boton" type="button" onclick={() => ir('ajustes')}>Ir a Ajustes</button>
+        {/if}
+      </section>
+    {:else}
+      <!-- Sin tu otro equipo: la guía es lo principal y, al lado, lo que se activa al encontrarlo. -->
+      <div class="sin-perfil">
+        <GuiaConexion para="remoto" {onerror} />
+        <aside class="desbloquea vidrio" aria-labelledby="remoto-desbloquea">
+          <div class="desbloquea__escena" aria-hidden="true">
+            <IlustracionEscena nombre="remoto-sin" icono="remoto" />
+          </div>
+          <div class="desbloquea__textos">
+            <h2 class="titulo-panel" id="remoto-desbloquea">
+              Cuando Nexo encuentre {esMac ? 'tu PC' : 'tu Mac'}, aquí podrás:
+            </h2>
+            <ul class="desbloquea__lista">
+              {#each desbloquea as d (d.texto)}
+                <li>
+                  <span class="ficha-icono chica tenue"><Icono nombre={d.icono} tamano={16} /></span>
+                  <span>{d.texto}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        </aside>
+      </div>
+    {/if}
+  {:else if remoto && resumen}
     {@const r = remoto}
+    {#if guiaArriba}
+      <GuiaConexion para="remoto" compacta {onerror} oncerrar={cerrarGuia} />
+    {/if}
     <!-- 1. Estado de la sesión: la ilustración a la izquierda; el estado, las acciones y los servicios a la derecha -->
     <section class="estado vidrio" aria-labelledby="remoto-estado">
       <div class="estado__escena {ruta}" aria-hidden="true">
@@ -673,7 +777,7 @@
             <button
               class="boton-primario"
               type="button"
-              disabled={conectando || !r.rustdesk}
+              disabled={conectando || !r.rustdesk || !r.ipMac}
               aria-busy={conectando}
               onclick={conectar}
             >
@@ -692,10 +796,12 @@
               <span class="servicio__valor">{s.valor}</span>
             </li>
           {/each}
-          <li class="servicio">
-            <span class="servicio__nombre">Tu Mac</span>
-            <span class="servicio__valor direccion">{r.ipMac}</span>
-          </li>
+          {#if r.ipMac}
+            <li class="servicio">
+              <span class="servicio__nombre">{esMac ? 'Esta Mac' : nombreMac === 'tu Mac' ? 'Tu Mac' : nombreMac}</span>
+              <span class="servicio__valor direccion">{r.ipMac}</span>
+            </li>
+          {/if}
         </ul>
 
         {#if avisoAccion}
@@ -1305,6 +1411,79 @@
   .cabecera p {
     margin: 4px 0 0;
     color: var(--texto-2);
+  }
+
+  /* ---------- Sin el perfil ---------- */
+  /* La guía y, al lado, lo que se activa. Angosto: una debajo de la otra. */
+  .sin-perfil {
+    display: grid;
+    gap: 16px;
+    align-items: start;
+    min-width: 0;
+  }
+  @container (min-width: 820px) {
+    .sin-perfil {
+      grid-template-columns: minmax(0, 1.55fr) minmax(260px, 1fr);
+    }
+  }
+  .desbloquea {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 12px 20px 18px 12px;
+    border-radius: var(--radio-lg);
+  }
+  .desbloquea__escena {
+    display: grid;
+    width: 100%;
+    aspect-ratio: 520 / 338;
+    max-height: 210px;
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: var(--superficie-inserto);
+  }
+  .desbloquea__textos {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+    padding-left: 8px;
+  }
+  .desbloquea__lista {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .desbloquea__lista li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 19px;
+    color: var(--texto-2);
+  }
+  /* Angosto y con lugar a lo ancho: el dibujo a la izquierda y la lista a la derecha. */
+  @container (min-width: 560px) and (max-width: 819px) {
+    .desbloquea {
+      grid-template-columns: minmax(200px, 0.9fr) minmax(0, 1fr);
+      align-items: center;
+      column-gap: 20px;
+      padding-bottom: 12px;
+    }
+  }
+
+  /* "Nunca" en Ajustes: una nota calma. */
+  .apagado {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 14px;
+    padding: 16px 20px;
+    border-radius: var(--radio-lg);
+  }
+  .apagado .textos {
+    flex: 1 1 240px;
   }
 
   /* ---------- 1. Estado ---------- */
