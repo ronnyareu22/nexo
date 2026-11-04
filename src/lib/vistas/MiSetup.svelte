@@ -947,10 +947,11 @@
   .escenas h2 {
     margin: 0;
   }
+  /* Escenas compactas: ícono a la izquierda, nombre y resumen al lado. Así el mapa queda a la vista. */
   .tarjetas {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 10px;
   }
   .tarjeta {
     position: relative;
@@ -962,17 +963,18 @@
     transition: background-color var(--dur-color) ease;
   }
   .tarjeta.cargando {
-    min-height: 150px;
+    min-height: 76px;
   }
   .tarjeta__toque,
   .tarjeta.nueva {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 1px;
+    align-content: center;
     width: 100%;
-    min-height: 150px;
-    padding: 16px 18px;
+    min-height: 76px;
+    padding: 12px 14px;
     border: 0;
     border-radius: 19px;
     background: transparent;
@@ -996,32 +998,34 @@
     cursor: progress;
   }
   .tarjeta__ficha {
+    grid-row: 1 / 4;
+    align-self: start;
     width: 40px;
     height: 40px;
-    margin-bottom: 8px;
     border-radius: 12px;
   }
   .tarjeta__nombre {
-    max-width: calc(100% - 34px);
+    grid-column: 2;
+    max-width: calc(100% - 26px);
     font: var(--letra-panel);
-    font-size: 16px;
+    font-size: 15px;
     letter-spacing: -0.01em;
   }
   .tarjeta.nueva .tarjeta__nombre {
     max-width: none;
   }
   .tarjeta__resumen {
+    grid-column: 2;
     font: var(--letra-pequena);
     color: var(--texto-2);
     font-variant-numeric: tabular-nums;
   }
   .tarjeta__estado {
+    grid-column: 2;
     display: flex;
     align-items: flex-start;
     gap: 6px;
-    min-height: 18px;
-    margin-top: auto;
-    padding-top: 8px;
+    padding-top: 2px;
     font-size: 12.5px;
     line-height: 18px;
     font-weight: 600;
@@ -1048,7 +1052,7 @@
     display: grid;
     gap: 4px;
     margin: -6px 0 0;
-    padding: 0 18px 14px 40px;
+    padding: 0 14px 12px 66px;
     font-size: 12.5px;
     line-height: 18px;
     color: var(--texto-2);

@@ -730,8 +730,8 @@
 
   /* ---------- Columnas: a la izquierda destino, zona y riel; a la derecha el historial ---------- */
   .columnas {
-    flex: 1;
     display: grid;
+    align-content: start;
     gap: 16px;
     min-width: 0;
   }
@@ -744,22 +744,22 @@
   }
   @container (min-width: 1040px) {
     .columnas {
-      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+      align-items: start;
     }
   }
 
   /* La zona (protagonista) y el riel de acciones a su lado, del mismo alto. */
   .heroe {
-    flex: 1;
     display: flex;
     gap: 12px;
-    min-height: 0;
+    align-items: stretch;
   }
   .heroe__riel {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    width: 252px;
+    width: clamp(300px, 38%, 380px);
   }
   .heroe__riel > :global(.riel) {
     flex: 1;
@@ -773,35 +773,13 @@
     }
   }
 
-  /* Ventana ancha y alta: todo cabe en la ventana, la zona crece y el historial se desplaza dentro de su panel. */
-  @media (min-width: 1324px) and (min-height: 700px) {
-    .vista {
-      height: 100%;
-    }
-    .columnas {
-      min-height: 0;
-    }
-    /* El riel mide lo que mide la zona: es un contenedor de alto fijo (RielXDrop decide si van mosaicos). */
-    .heroe__riel {
-      container: riel / size;
-    }
-    .heroe__riel > :global(.riel) {
-      min-height: 0;
-      overflow-y: auto;
-    }
-    .historial {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-    }
-    .historial > .lista {
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
-      margin-right: -12px;
-      padding-right: 12px;
-    }
+  /* Cada cosa mide lo que necesita: nada se estira al alto de la ventana (dejaba grandes espacios vacíos).
+     Si el historial crece mucho, se desplaza dentro de su panel. */
+  .historial > .lista {
+    max-height: 560px;
+    overflow-y: auto;
+    margin-right: -12px;
+    padding-right: 12px;
   }
 
   /* ---------- Zona para soltar ---------- */
@@ -812,7 +790,7 @@
     align-content: center;
     gap: 6px;
     min-width: 0;
-    min-height: 300px;
+    min-height: 260px;
     padding: 32px 28px;
     border-radius: var(--radio-lg);
     text-align: center;

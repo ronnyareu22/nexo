@@ -119,11 +119,13 @@
 </div>
 
 <style>
+  /* Sin alturas en %: el motor de Safari (el de Nexo en la Mac) no las resuelve dentro de flex y la pista
+     quedaba en 0. La altura sale de estirarse: la tira le da el alto y la pista se estira a lo alto. */
   .deslizador {
     position: relative;
     display: flex;
     justify-content: center;
-    height: 100%;
+    align-items: stretch;
     min-height: 0;
     outline: none;
     cursor: ns-resize;
@@ -137,8 +139,9 @@
   .pista {
     position: relative;
     flex-shrink: 0;
+    align-self: stretch;
     width: 60px;
-    height: 100%;
+    min-height: 120px;
     border-radius: 20px;
     background: var(--superficie-hundida);
     box-shadow: inset 0 0 0 1px var(--borde);
