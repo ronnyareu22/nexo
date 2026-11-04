@@ -464,12 +464,29 @@ fn leer_registro() -> Registro {
     let ciclos = propiedad(c"CycleCount").and_then(|c| u32::try_from(c).ok());
     let diseno = propiedad(c"DesignCapacity").filter(|d| *d > 0);
     let hoy = propiedad(c"NominalChargeCapacity").or_else(|| propiedad(c"AppleRawMaxCapacity")).filter(|c| *c > 0);
-    let salud = diseno.zip(hoy).map(|(d, h)| (h * 100 / d).clamp(1, 100) as u8);
+    // La "Capacidad máxima" de Ajustes del Sistema; la cuenta propia solo si macOS no la da.
+    let salud = capacidad_segun_macos()
+        .or_else(|| diseno.zip(hoy).map(|(d, h)| ((h * 100 + d / 2) / d).clamp(1, 100) as u8));
     // En centésimas de grado.
     let grados = propiedad(c"Temperature").map(|t| t as f32 / 100.0).filter(|g| (-20.0..90.0).contains(g));
     // SAFETY: el servicio es propio.
     unsafe { IOObjectRelease(servicio) };
     Registro { ciclos, salud, grados: grados.map(|g| (g * 10.0).round() / 10.0) }
+}
+
+/// La "Capacidad máxima" tal como la muestra macOS (Ajustes › Batería › Salud). macOS la calcula por dentro y no
+/// la deja en AppleSmartBattery: la cuenta con NominalChargeCapacity da otro número (95 frente a 98).
+fn capacidad_segun_macos() -> Option<u8> {
+    let salida = std::process::Command::new("/usr/sbin/system_profiler")
+        .args(["SPPowerDataType", "-json", "-detailLevel", "mini"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&salida.stdout).ok()?;
+    json.get("SPPowerDataType")?.as_array()?.iter().find_map(|fuente| {
+        let texto = fuente.get("sppower_battery_health_info")?.get("sppower_battery_health_maximum_capacity")?.as_str()?;
+        texto.trim().trim_end_matches('%').trim().parse::<u8>().ok().filter(|v| (1..=100).contains(v))
+    })
 }
 
 /// El nivel, si carga y cuánto le queda, como lo dice la barra de menús.

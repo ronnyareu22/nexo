@@ -200,7 +200,7 @@
     const partes: string[] = [];
     if (b.minutos) partes.push(b.cargando ? `Llena en ${duracion(b.minutos * 60)}` : `Quedan ${duracion(b.minutos * 60)}`);
     if (b.ciclos !== null) partes.push(`${num(b.ciclos)} ciclos`);
-    if (b.salud !== null) partes.push(`capacidad ${b.salud}${NB}%`);
+    if (b.salud !== null) partes.push(`capacidad máxima ${b.salud}${NB}%`);
     const tono = b.nivel <= 10 ? 'var(--error)' : b.nivel <= 20 ? 'var(--aviso)' : 'var(--exito)';
     return { b, estado, detalle: partes.join(' · '), tono };
   });
