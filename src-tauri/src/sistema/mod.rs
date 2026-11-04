@@ -1,15 +1,18 @@
 //! Integración con el sistema: ajustes guardados, teclas de brillo, aviso en pantalla,
 //! permisos, abrir Nexo al iniciar sesión, el widget de escritorio, el remoto (RustDesk por Tailscale)
 //! y Nexo Drop (archivos, textos y enlaces entre los equipos del dueño por Tailscale).
+//! Mi setup: el mapa de la casa y la oficina (`setup`) y las escenas de un toque (`escenas`).
 
 pub mod ajustes;
 pub mod arranque;
 pub mod aviso;
 pub mod drop;
+pub mod escenas;
 pub mod permisos;
 pub mod remoto;
 #[cfg(windows)]
 pub mod remoto_windows;
+pub mod setup;
 pub mod teclas;
 pub mod widget;
 pub mod widgets_mac;

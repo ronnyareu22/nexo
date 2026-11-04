@@ -40,6 +40,19 @@ pub fn lanzar() {
 
 /// Hace la captura y espera a que termine. `None` si se canceló con Esc.
 pub fn capturar(app: &AppHandle) -> Result<Option<Captura>, String> {
+    let Some((png, ancho, alto)) = tomar()? else { return Ok(None) };
+
+    // Al portapapeles va solo el PNG liviano (marcado: el portapapeles liviano no lo vuelve a tocar).
+    let copiada = portapapeles::escribir_imagen(&png);
+    let archivo = guardar(&png);
+    let captura = Captura { ancho, alto, kb: (png.len() / 1024) as u32, archivo, copiada };
+    let _ = app.emit("remoto-captura", &captura);
+    Ok(Some(captura))
+}
+
+/// Eliges una zona y queda en 1x: el PNG con su ancho y alto, sin tocar el portapapeles.
+/// `None` si se canceló con Esc. También la usa XDrop ("Enviar captura").
+pub fn tomar() -> Result<Option<(Vec<u8>, u32, u32)>, String> {
     if CAPTURANDO.swap(true, Ordering::SeqCst) {
         return Err("Ya hay una captura en curso.".into());
     }
@@ -73,25 +86,24 @@ pub fn capturar(app: &AppHandle) -> Result<Option<Captura>, String> {
     let medida = imagen::medir(&datos).ok_or("La captura salió dañada.")?;
     let escala = (medida.dpi / 72.0).max(1.0);
     let lado = ((medida.ancho.max(medida.alto) as f64) / escala).round().max(1.0) as u32;
-    let (png, ancho, alto) = if escala > 1.05 {
+    let lista = if escala > 1.05 {
         imagen::achicar_png(&datos, lado).unwrap_or((datos, medida.ancho, medida.alto))
     } else {
         (datos, medida.ancho, medida.alto)
     };
+    Ok(Some(lista))
+}
 
-    // Al portapapeles va solo el PNG liviano (marcado: el portapapeles liviano no lo vuelve a tocar).
-    let copiada = portapapeles::escribir_imagen(&png);
-    let archivo = guardar(&png);
-    let captura = Captura { ancho, alto, kb: (png.len() / 1024) as u32, archivo, copiada };
-    let _ = app.emit("remoto-captura", &captura);
-    Ok(Some(captura))
+/// El nombre de una captura nueva, sin la extensión: "Captura 2026-11-03 a las 14.05.33".
+pub fn nombre() -> String {
+    format!("Captura {}", fecha())
 }
 
 /// Guarda la copia como "Captura 2026-11-03 a las 14.05.33.png". Devuelve dónde quedó.
 fn guardar(png: &[u8]) -> Option<String> {
     let carpeta = carpeta()?;
     std::fs::create_dir_all(&carpeta).ok()?;
-    let archivo = nombre_libre(&carpeta, &format!("Captura {}", fecha()));
+    let archivo = nombre_libre(&carpeta, &nombre());
     std::fs::write(&archivo, png).ok()?;
     Some(archivo.display().to_string())
 }

@@ -6,7 +6,7 @@
 //!   este (el `UserID` de `Self` y el del par con esa dirección) y a este mismo equipo. Al resto, 403.
 //! - Cada conexión va en su propio hilo (16 a la vez como mucho) y se corta si pasa 30 s sin datos.
 //! - Rutas: `GET /nexo/hola`, `PUT /nexo/archivo?nombre=&tamano=&lote=&indice=&total=&desde=`,
-//!   `POST /nexo/texto` `{texto}` y `POST /nexo/enlace` `{url}`.
+//!   `POST /nexo/texto` `{texto}` y `POST /nexo/enlace` `{url}`. Mi setup: `GET /nexo/aparatos` (ver sistema/setup.rs).
 //! - Un archivo llega a un temporal oculto en Descargas › Nexo Drop y, completo, pasa a su nombre final
 //!   (con sus carpetas y "(2)" si ya existe). Si se corta, el temporal se borra.
 
@@ -400,7 +400,13 @@ fn atender(app: &AppHandle, mut s: TcpStream) {
             ("PUT", "/nexo/archivo") => archivo(app, &mut s, &p, resto, ip),
             ("POST", "/nexo/texto") => texto(app, &mut s, &p, resto, ip),
             ("POST", "/nexo/enlace") => enlace(app, &mut s, &p, resto, ip),
-            (_, "/nexo/hola" | "/nexo/archivo" | "/nexo/texto" | "/nexo/enlace") => Err(fallo(405, "Método no permitido.")),
+            ("GET", "/nexo/aparatos") => {
+                let _ = responder(&mut s, 200, &crate::sistema::setup::aparatos_json(app));
+                Ok(())
+            }
+            (_, "/nexo/hola" | "/nexo/archivo" | "/nexo/texto" | "/nexo/enlace" | "/nexo/aparatos") => {
+                Err(fallo(405, "Método no permitido."))
+            }
             _ => Err(fallo(404, "No existe.")),
         }
     });
@@ -476,7 +482,7 @@ fn archivo(app: &AppHandle, s: &mut TcpStream, p: &Pedido, resto: Vec<u8>, ip: I
     let equipo = equipo_de(ip, p.consulta.get("desde"));
 
     let carpeta = super::carpeta(app).ok_or_else(|| fallo(500, "No encontré la carpeta Descargas."))?;
-    std::fs::create_dir_all(&carpeta).map_err(|e| Fallo(500, format!("No pude crear la carpeta Nexo Drop ({e}).")))?;
+    std::fs::create_dir_all(&carpeta).map_err(|e| Fallo(500, format!("No pude crear la carpeta XDrop ({e}).")))?;
     let temporal = carpeta.join(format!(".nexo-{lote}-{indice}-{}.parte", unico()));
     let mut f = File::create(&temporal).map_err(|e| Fallo(500, format!("No pude guardar el archivo ({e}).")))?;
 

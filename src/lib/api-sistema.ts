@@ -236,6 +236,10 @@ export const enviarEnlaceDrop = (destino: string, url: string): Promise<void> =>
 export const enviarCopiadoDrop = (destino: string): Promise<EnvioCopiado> =>
   enApp ? invoke<EnvioCopiado>('drop_enviar_portapapeles', { destino }) : copiadoDropEjemplo(destino);
 
+/** Mac: eliges una zona de la pantalla y se manda como PNG. null si se canceló con Esc. */
+export const enviarCapturaDrop = (destino: string): Promise<{ lote: string } | null> =>
+  enApp ? invoke<{ lote: string } | null>('drop_enviar_captura', { destino }) : capturaDropEjemplo(destino);
+
 /** El historial de lo enviado y lo recibido (las últimas 40 entradas), con miniaturas de las imágenes. */
 export const leerHistorialDrop = (): Promise<EntradaDrop[]> =>
   enApp ? invoke<EntradaDrop[]>('drop_historial') : Promise.resolve(historialDropEjemplo.map((e) => ({ ...e })));
@@ -249,14 +253,14 @@ export const mostrarDrop = (id: number): Promise<void> => (enApp ? invoke<void>(
 /** Copia el texto o el enlace de esa entrada al portapapeles. */
 export const copiarDrop = (id: number): Promise<void> => (enApp ? invoke<void>('drop_copiar', { id }) : Promise.resolve());
 
-/** Borra el historial de Nexo Drop (los archivos recibidos no se tocan). */
+/** Borra el historial de XDrop (los archivos recibidos no se tocan). */
 export const borrarHistorialDrop = (): Promise<void> =>
   enApp ? invoke<void>('drop_borrar_historial') : Promise.resolve(void historialDropEjemplo.splice(0));
 
-/** Abre Descargas › Nexo Drop. */
+/** Abre Descargas › XDrop. */
 export const abrirCarpetaDrop = (): Promise<void> => (enApp ? invoke<void>('drop_abrir_carpeta') : Promise.resolve());
 
-/** Cómo está Nexo Drop en este equipo: ajustes y si escucha. */
+/** Cómo está XDrop en este equipo: ajustes y si escucha. */
 export const leerAjustesDrop = (): Promise<EstadoDrop> =>
   enApp ? invoke<EstadoDrop>('drop_ajustes') : Promise.resolve(copiaEstadoDrop());
 
@@ -295,7 +299,8 @@ export function alArrastrarArchivos(alLlegar: (a: ArrastreArchivos) => void): ()
 }
 
 /** Para revisar el diseño fuera de la app: `?drop=capa` (arrastrando sobre la ventana), `?drop=enviando`,
- *  `?drop=sin` (sin otro equipo), `?drop=apagada` (el otro equipo sin Nexo) y `?drop=varios` (dos destinos). */
+ *  `?drop=sin` (sin otro equipo), `?drop=apagada` (el otro equipo sin Nexo), `?drop=varios` (dos destinos),
+ *  `?drop=ajustes` (el engranaje abierto) y `?drop=enlace` o `?drop=nota` (el campo del riel abierto). */
 export const pruebaDrop: string | null =
   !enApp && typeof location !== 'undefined' ? new URLSearchParams(location.search).get('drop') : null;
 
@@ -532,7 +537,7 @@ const estadoDropEjemplo: EstadoDrop = {
   escuchando: esMac ? '100.88.188.99' : '100.118.228.87',
   nombre: esMac ? 'demo-sige' : 'innotech1017',
   plataforma: esMac ? 'mac' : 'windows',
-  carpeta: esMac ? '/Users/ronny/Downloads/Nexo Drop' : 'C:\\Users\\ronny\\Downloads\\Nexo Drop',
+  carpeta: esMac ? '/Users/ronny/Downloads/XDrop' : 'C:\\Users\\ronny\\Downloads\\XDrop',
   tailscale: 'activo',
   puerto: 47821,
 };
@@ -656,6 +661,14 @@ async function copiadoDropEjemplo(destino: string): Promise<EnvioCopiado> {
   return { tipo: 'imagen', lote, cantidad: 1 };
 }
 
+async function capturaDropEjemplo(destino: string): Promise<{ lote: string } | null> {
+  await esperaEjemplo(700);
+  const lote = `ejemplo-${siguienteDropEjemplo++}`;
+  const equipo = destinosEjemplo.find((d) => d.ip === destino)?.nombre ?? destino;
+  simularEnvio(lote, ['Captura 2026-11-03 a las 14.05.33.png'], equipo);
+  return { lote };
+}
+
 // `?drop=enviando`: una carpeta a mitad de camino.
 if (pruebaDrop === 'enviando' && destinosEjemplo[0]) {
   simularEnvio(
@@ -678,11 +691,11 @@ const fotoEjemplo =
 const equipoOtro = esMac ? 'innotech1017' : 'demo-sige';
 
 const historialDropEjemplo: EntradaDrop[] = [
-  { id: 9, direccion: 'recibido', tipo: 'archivo', nombre: 'Captura de pantalla 2026-11-03 182455.png', cantidad: 1, total: 1, tamano: 412_000, equipo: equipoOtro, momento: haceMin(2), ruta: '/Users/ronny/Downloads/Nexo Drop/Captura.png', texto: null, estado: 'completo', error: null, lote: 'a', miniatura: miniaturaEjemplo, existe: true },
+  { id: 9, direccion: 'recibido', tipo: 'archivo', nombre: 'Captura de pantalla 2026-11-03 182455.png', cantidad: 1, total: 1, tamano: 412_000, equipo: equipoOtro, momento: haceMin(2), ruta: '/Users/ronny/Downloads/XDrop/Captura.png', texto: null, estado: 'completo', error: null, lote: 'a', miniatura: miniaturaEjemplo, existe: true },
   { id: 8, direccion: 'enviado', tipo: 'carpeta', nombre: 'Propuesta SIGE', cantidad: 14, total: 14, tamano: 38_600_000, equipo: equipoOtro, momento: haceMin(9), ruta: '/Users/ronny/Documents/Propuesta SIGE', texto: null, estado: 'completo', error: null, lote: 'b', miniatura: null, existe: true },
   { id: 7, direccion: 'recibido', tipo: 'texto', nombre: 'Texto', cantidad: 1, total: 1, tamano: 74, equipo: equipoOtro, momento: haceMin(16), ruta: null, texto: 'ssh deploy@10.20.0.14 -p 2222\ncd /srv/sige && git pull && docker compose up -d', estado: 'completo', error: null, lote: null, miniatura: null, existe: false },
   { id: 6, direccion: 'enviado', tipo: 'enlace', nombre: 'Enlace', cantidad: 1, total: 1, tamano: 52, equipo: equipoOtro, momento: haceMin(31), ruta: null, texto: 'https://tailscale.com/kb/1080/cli#status', estado: 'completo', error: null, lote: null, miniatura: null, existe: false },
-  { id: 5, direccion: 'recibido', tipo: 'archivo', nombre: 'vista-del-cerro.jpg', cantidad: 1, total: 1, tamano: 2_840_000, equipo: equipoOtro, momento: haceMin(75), ruta: '/Users/ronny/Downloads/Nexo Drop/vista-del-cerro.jpg', texto: null, estado: 'completo', error: null, lote: 'c', miniatura: fotoEjemplo, existe: true },
+  { id: 5, direccion: 'recibido', tipo: 'archivo', nombre: 'vista-del-cerro.jpg', cantidad: 1, total: 1, tamano: 2_840_000, equipo: equipoOtro, momento: haceMin(75), ruta: '/Users/ronny/Downloads/XDrop/vista-del-cerro.jpg', texto: null, estado: 'completo', error: null, lote: 'c', miniatura: fotoEjemplo, existe: true },
   { id: 4, direccion: 'enviado', tipo: 'varios', nombre: 'Factura octubre.pdf', cantidad: 3, total: 3, tamano: 1_260_000, equipo: equipoOtro, momento: haceMin(140), ruta: null, texto: null, estado: 'completo', error: null, lote: 'd', miniatura: null, existe: false },
   { id: 3, direccion: 'enviado', tipo: 'archivo', nombre: 'respaldo-base-datos-2026-11-02.sql.gz', cantidad: 0, total: 1, tamano: 0, equipo: equipoOtro, momento: haceMin(300), ruta: '/Users/ronny/Desktop/respaldo-base-datos-2026-11-02.sql.gz', texto: null, estado: 'error', error: `No pude conectar con ${equipoOtro}. Revisa que esté encendida y con Nexo abierto.`, lote: 'e', miniatura: null, existe: true },
 ];

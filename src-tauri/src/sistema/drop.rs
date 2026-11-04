@@ -1,8 +1,8 @@
-//! Nexo Drop: pasar archivos, carpetas, textos y enlaces entre los equipos del dueño por Tailscale.
+//! XDrop (antes Nexo Drop): pasar archivos, carpetas, textos, enlaces y capturas entre los equipos del dueño por Tailscale.
 //!
 //! - Receptor (`servidor`): un HTTP mínimo que escucha solo en la dirección de Tailscale de este equipo, puerto 47821.
 //!   Solo atiende a equipos del mismo dueño en Tailscale (y a este mismo equipo, para probar).
-//!   Lo recibido queda en Descargas › Nexo Drop; el texto va al portapapeles y el enlace se abre en el navegador.
+//!   Lo recibido queda en Descargas › XDrop; el texto va al portapapeles y el enlace se abre en el navegador.
 //! - Envío (`envio`): un lote a la vez, en otro hilo, con avance ("drop-progreso") y la opción de cancelar.
 //! - Historial (`historial`): las últimas 40 entradas en drop.json.
 //! - Lo propio de cada sistema (portapapeles, miniaturas, abrir y mostrar) va en `mac` y `win`.
@@ -38,8 +38,14 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
-/// El puerto de Nexo Drop en la red de Tailscale.
+/// El puerto de XDrop en la red de Tailscale.
 pub const PUERTO: u16 = 47821;
+
+/// El nombre de XDrop en pantalla y en las notificaciones.
+pub const NOMBRE: &str = "XDrop";
+
+/// La carpeta de lo recibido, dentro de Descargas (igual en Mac y en Windows).
+pub const CARPETA: &str = "XDrop";
 
 /// "mac" o "windows": lo que responde `GET /nexo/hola`.
 pub const PLATAFORMA: &str = if cfg!(target_os = "macos") {
@@ -74,7 +80,7 @@ pub struct CambioDrop {
     pub copiar_imagenes: Option<bool>,
 }
 
-/// Cómo está Nexo Drop en este equipo.
+/// Cómo está XDrop en este equipo.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EstadoDrop {
@@ -144,10 +150,10 @@ pub fn iniciar(app: &AppHandle) {
     servidor::iniciar(app.clone(), a.recibir);
 }
 
-/// Descargas › Nexo Drop.
+/// Descargas › XDrop.
 pub fn carpeta(app: &AppHandle) -> Option<PathBuf> {
     let descargas = app.path().download_dir().ok().or_else(|| app.path().home_dir().ok().map(|h| h.join("Downloads")))?;
-    Some(descargas.join("Nexo Drop"))
+    Some(descargas.join(CARPETA))
 }
 
 /// El nombre de este equipo en Tailscale ("demo-sige") o, si no se sabe, el del sistema.
@@ -161,7 +167,7 @@ fn nombre_de(ip: Ipv4Addr) -> Option<String> {
 }
 
 fn notificar(app: &AppHandle, cuerpo: String) {
-    let _ = app.notification().builder().title("Nexo Drop").body(cuerpo).show();
+    let _ = app.notification().builder().title(NOMBRE).body(cuerpo).show();
 }
 
 fn avisar_recibido(app: &AppHandle, e: &Entrada) {
@@ -378,6 +384,32 @@ pub async fn drop_enviar_portapapeles(app: AppHandle, destino: String) -> Result
     .await
 }
 
+/// Mac: eliges una zona de la pantalla (la misma captura liviana del remoto, en 1x) y se manda como PNG.
+/// `None` si se canceló con Esc. El avance llega por "drop-progreso".
+#[tauri::command]
+pub async fn drop_enviar_captura(app: AppHandle, destino: String) -> Result<Option<Envio>, String> {
+    en_segundo_plano(move || enviar_captura(&app, &destino)).await
+}
+
+#[cfg(target_os = "macos")]
+fn enviar_captura(app: &AppHandle, destino: &str) -> Result<Option<Envio>, String> {
+    let (ip, equipo) = destino_valido(destino)?;
+    let Some((png, _, _)) = super::remoto::captura::tomar()? else { return Ok(None) };
+    let carpeta = std::env::temp_dir().join(format!("nexo-drop-{}", envio::nuevo_lote()));
+    let archivo = carpeta.join(format!("{}.png", super::remoto::captura::nombre()));
+    std::fs::create_dir_all(&carpeta)
+        .and_then(|_| std::fs::write(&archivo, &png))
+        .map_err(|e| format!("No pude preparar la captura ({e})."))?;
+    // La carpeta temporal se borra al terminar el envío.
+    let lote = envio::encolar(app, vec![archivo], ip, equipo, vec![carpeta]);
+    Ok(Some(Envio { lote }))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn enviar_captura(_app: &AppHandle, _destino: &str) -> Result<Option<Envio>, String> {
+    Err("Enviar una captura funciona desde la Mac. Aquí, cópiala con Win+Shift+S y usa «Enviar lo que copiaste».".into())
+}
+
 /// El historial (lo enviado y lo recibido), con miniaturas de las imágenes.
 #[tauri::command]
 pub async fn drop_historial() -> Vec<EntradaVista> {
@@ -426,13 +458,13 @@ pub async fn drop_copiar(id: u64) -> Result<(), String> {
     .await
 }
 
-/// Borra el historial de Nexo Drop. Los archivos recibidos no se tocan.
+/// Borra el historial de XDrop. Los archivos recibidos no se tocan.
 #[tauri::command]
 pub async fn drop_borrar_historial() {
     let _ = tauri::async_runtime::spawn_blocking(historial::borrar).await;
 }
 
-/// Abre Descargas › Nexo Drop (la crea si no existe).
+/// Abre Descargas › XDrop (la crea si no existe).
 #[tauri::command]
 pub async fn drop_abrir_carpeta(app: AppHandle) -> Result<(), String> {
     en_segundo_plano(move || {
@@ -443,7 +475,7 @@ pub async fn drop_abrir_carpeta(app: AppHandle) -> Result<(), String> {
     .await
 }
 
-/// Cómo está Nexo Drop en este equipo: ajustes, si escucha y dónde.
+/// Cómo está XDrop en este equipo: ajustes, si escucha y dónde.
 #[tauri::command]
 pub async fn drop_ajustes(app: AppHandle) -> Result<EstadoDrop, String> {
     en_segundo_plano(move || Ok(estado(&app))).await

@@ -34,6 +34,7 @@
   import BotonTema from '$lib/componentes/BotonTema.svelte';
   import Icono, { type Nombre } from '$lib/componentes/Icono.svelte';
   import VistaInicio from '$lib/vistas/Inicio.svelte';
+  import VistaSetup from '$lib/vistas/MiSetup.svelte';
   import VistaDispositivos from '$lib/vistas/Dispositivos.svelte';
   import VistaAudio from '$lib/vistas/Audio.svelte';
   import VistaPantallas from '$lib/vistas/Pantallas.svelte';
@@ -44,7 +45,16 @@
   import VistaAjustes from '$lib/vistas/Ajustes.svelte';
   import VistaBienvenida from '$lib/vistas/Bienvenida.svelte';
 
-  type Seccion = 'inicio' | 'dispositivos' | 'audio' | 'pantallas' | 'remoto' | 'drop' | 'automatizaciones' | 'ajustes';
+  type Seccion =
+    | 'inicio'
+    | 'setup'
+    | 'dispositivos'
+    | 'audio'
+    | 'pantallas'
+    | 'remoto'
+    | 'drop'
+    | 'automatizaciones'
+    | 'ajustes';
 
   // Antes de pintar: en Mac los botones de la ventana van sobre la barra lateral; en Windows no (BarraLateral).
   document.documentElement.dataset.plataforma = plataforma;
@@ -52,11 +62,12 @@
   // Widgets y Teclado y ratón todavía no (decisión del dueño, 3 nov).
   const secciones: { id: Seccion; nombre: string; icono: Nombre }[] = [
     { id: 'inicio', nombre: 'Inicio', icono: 'inicio' },
+    { id: 'setup', nombre: 'Mi setup', icono: 'setup' },
     { id: 'dispositivos', nombre: 'Dispositivos', icono: 'dispositivos' },
     { id: 'audio', nombre: 'Audio', icono: 'audio' },
     { id: 'pantallas', nombre: 'Pantallas', icono: 'pantallas' },
     { id: 'remoto', nombre: 'Remoto', icono: 'remoto' },
-    { id: 'drop', nombre: 'Drop', icono: 'drop' },
+    { id: 'drop', nombre: 'XDrop', icono: 'drop' },
     { id: 'automatizaciones', nombre: 'Automatizaciones', icono: 'automatizaciones' },
     { id: 'ajustes', nombre: 'Ajustes', icono: 'engranaje' },
   ];
@@ -336,6 +347,8 @@
           >
             {#if seccion === 'inicio'}
               <VistaInicio {estado} {pantallas} {nombre} onir={ir} onalternar={alternar} {pendienteId} />
+            {:else if seccion === 'setup'}
+              <VistaSetup {estado} {pantallas} onir={ir} onerror={mostrarAviso} />
             {:else if seccion === 'dispositivos'}
               <VistaDispositivos
                 {estado}

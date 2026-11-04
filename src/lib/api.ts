@@ -48,6 +48,18 @@ export const usarDispositivoAudio = (uid: string, entrada: boolean): Promise<Dis
 export const ajustarDispositivoAudio = (uid: string, cambio: CambioSonido): Promise<DispositivoAudio[]> =>
   enApp ? invoke<DispositivoAudio[]>('ajustar_dispositivo_audio', { uid, cambio }) : cambiarAudioEjemplo(uid, cambio);
 
+/** "Probar sonido": un aviso corto por la salida en uso. */
+export const probarSonido = (): Promise<void> =>
+  enApp ? invoke<void>('probar_sonido') : new Promise((listo) => setTimeout(listo, 250));
+
+/** Mac: el volumen de avisos y efectos (0–100). En Windows no hay uno aparte: null. */
+export const leerVolumenAvisos = (): Promise<number | null> =>
+  enApp ? invoke<number | null>('volumen_avisos') : Promise.resolve(enMacEjemplo ? avisosEjemplo : null);
+
+/** Mac: cambia el volumen de avisos y efectos. */
+export const ponerVolumenAvisos = (valor: number): Promise<void> =>
+  enApp ? invoke<void>('poner_volumen_avisos', { valor }) : Promise.resolve(void (avisosEjemplo = valor));
+
 /** Nombre de pila de la cuenta del sistema ("Ronny"); vacío si el sistema no da ninguno. */
 export const leerNombreUsuario = (): Promise<string> =>
   enApp ? invoke<string>('nombre_usuario') : Promise.resolve('Ronny');
@@ -91,6 +103,10 @@ export const guardarAutomatico = (id: string, ajustes: Automatico): Promise<Auto
 export const abrirAjustesBluetooth = (): Promise<void> =>
   enApp ? invoke<void>('abrir_ajustes_bluetooth') : Promise.resolve();
 
+/** Abre los ajustes de sonido del sistema. */
+export const abrirAjustesSonido = (): Promise<void> =>
+  enApp ? invoke<void>('abrir_ajustes_sonido') : Promise.resolve();
+
 // --- Datos de ejemplo (solo fuera de la app) ---
 
 /** Cada aparato de ejemplo con su propia historia, para que Inicio muestre una actividad creíble. */
@@ -119,27 +135,32 @@ function historialEjemplo(id: string): Registro {
   return { sesiones: [[t - 4 * 86400, t - 4 * 86400 + 3600]], bateria: [] };
 }
 
+const enMacEjemplo = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
+// `?audio=bt`: el micrófono de los audífonos en uso (para ver el aviso de calidad de Audio).
+const microBt = !enApp && typeof location !== 'undefined' && new URLSearchParams(location.search).get('audio') === 'bt';
+let avisosEjemplo = 60;
+
 // Lo que hay hoy en la Mac del dueño (los volúmenes son de ejemplo).
 const audioEjemplo: DispositivoAudio[] = [
   {
     uid: 'E8-9E-13-61-CE-B7:output', nombre: 'WH-CH520', salida: true, entrada: false,
-    salidaEnUso: true, entradaEnUso: false, volumen: 72, silenciado: false, volumenEntrada: null, transporte: 'bluetooth',
+    salidaEnUso: true, entradaEnUso: false, volumen: 72, silenciado: false, volumenEntrada: null, silenciadoEntrada: null, transporte: 'bluetooth',
   },
   {
     uid: 'BuiltInMicrophoneDevice', nombre: 'Micrófono de MacBook Pro', salida: false, entrada: true,
-    salidaEnUso: false, entradaEnUso: true, volumen: null, silenciado: null, volumenEntrada: 35, transporte: 'integrado',
+    salidaEnUso: false, entradaEnUso: !microBt, volumen: null, silenciado: null, volumenEntrada: 35, silenciadoEntrada: false, transporte: 'integrado',
   },
   {
     uid: 'BuiltInSpeakerDevice', nombre: 'Bocinas de MacBook Pro', salida: true, entrada: false,
-    salidaEnUso: false, entradaEnUso: false, volumen: 81, silenciado: false, volumenEntrada: null, transporte: 'integrado',
+    salidaEnUso: false, entradaEnUso: false, volumen: 81, silenciado: false, volumenEntrada: null, silenciadoEntrada: null, transporte: 'integrado',
   },
   {
     uid: 'CA4B84B0-E2A8-4393-9482-C60500000003', nombre: 'Micrófono de iPhone de Ronny', salida: false, entrada: true,
-    salidaEnUso: false, entradaEnUso: false, volumen: null, silenciado: null, volumenEntrada: null, transporte: 'otro',
+    salidaEnUso: false, entradaEnUso: false, volumen: null, silenciado: null, volumenEntrada: null, silenciadoEntrada: null, transporte: 'otro',
   },
   {
     uid: 'E8-9E-13-61-CE-B7:input', nombre: 'WH-CH520', salida: false, entrada: true,
-    salidaEnUso: false, entradaEnUso: false, volumen: null, silenciado: null, volumenEntrada: 68, transporte: 'bluetooth',
+    salidaEnUso: false, entradaEnUso: microBt, volumen: null, silenciado: null, volumenEntrada: 68, silenciadoEntrada: false, transporte: 'bluetooth',
   },
 ];
 
@@ -152,7 +173,7 @@ function cambiarAudioEjemplo(uid: string, cambio: CambioSonido): Promise<Disposi
   const d = audioEjemplo.find((x) => x.uid === uid);
   if (!d) return Promise.reject('Ese aparato de sonido ya no está conectado');
   const sinSalida = !d.salida && ['usarSalida', 'volumen', 'silenciar'].includes(cambio.accion);
-  const sinEntrada = !d.entrada && ['usarMicrofono', 'volumenMicrofono'].includes(cambio.accion);
+  const sinEntrada = !d.entrada && ['usarMicrofono', 'volumenMicrofono', 'silenciarMicrofono'].includes(cambio.accion);
   if (sinSalida) return Promise.reject('Este aparato no tiene salida de sonido activa');
   if (sinEntrada) return Promise.reject('Este aparato no tiene micrófono activo');
   if (cambio.accion === 'usarSalida') for (const x of audioEjemplo) x.salidaEnUso = x === d;
@@ -160,6 +181,7 @@ function cambiarAudioEjemplo(uid: string, cambio: CambioSonido): Promise<Disposi
   if (cambio.accion === 'volumen') d.volumen = cambio.valor;
   if (cambio.accion === 'silenciar') d.silenciado = cambio.valor;
   if (cambio.accion === 'volumenMicrofono') d.volumenEntrada = cambio.valor;
+  if (cambio.accion === 'silenciarMicrofono') d.silenciadoEntrada = cambio.valor;
   return Promise.resolve(copiaAudioEjemplo());
 }
 

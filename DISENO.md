@@ -57,7 +57,9 @@ src-tauri/src/
 | Resolución, frecuencia y pantalla principal | ⚠️ lectura comprobada (132 modos); cambiar sin probar, con vuelta atrás a los 15 s | ⏳ |
 | Permisos (Accesibilidad, Bluetooth) y arranque al iniciar sesión | ✅ lectura · ⚠️ activar el arranque sin probar · las notificaciones no informan su estado real | ⏳ |
 | Interfaz nueva: barra lateral, Inicio, Dispositivos, Audio, Pantallas, Automatizaciones, Ajustes | ✅ revisada en claro y oscuro con datos reales | ✅ (misma interfaz) |
-| Nexo Drop: archivos, carpetas, textos y enlaces entre tus equipos por Tailscale (puerto 47821) | ⚠️ escrito, sin probar entre los dos equipos | ⚠️ escrito y compilado con cargo-xwin, sin probar |
+| XDrop (antes Nexo Drop): archivos, carpetas, textos, enlaces y capturas entre tus equipos por Tailscale (puerto 47821) | ⚠️ escrito, sin probar entre los dos equipos | ⚠️ escrito y compilado con cargo-xwin, sin probar (sin "Enviar captura") |
+| Audio como mezclador: tiras verticales, silencio del micrófono, "Probar sonido" y volumen de avisos | ⚠️ escrito; el silencio del micrófono depende del aparato · avisos con `osascript` | ⚠️ escrito y compilado con cargo-xwin (sin volumen de avisos) |
+| Mi setup: escenas de un toque (también en el menú del ícono) y el mapa editable de la casa y la oficina (`GET /nexo/aparatos` por XDrop) | ⚠️ escrito; lógica pura con pruebas (`cargo test --lib setup escenas`), sin probar con los aparatos ni entre los dos equipos | ⚠️ escrito y compilado con cargo-xwin, sin probar ("Modo remoto" abre RustDesk) |
 
 **Medidas actuales:** la app pesa 4,5 MB y el proceso principal usa unos 27 MB. Con el panel abierto se suman unos 70 MB del motor web, que se liberan al cerrar el panel.
 
@@ -181,6 +183,10 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - Baterías y estado del Bluetooth.
    - Atajos frecuentes.
    - **Actividad reciente**, sacada del historial real ("WH-CH520 se conectó a las 12:40").
+1b. **Mi setup** (`vistas/MiSetup.svelte`, escrito el 3 nov; pedido del dueño: "ver todos mis dispositivos como un mapa… decir modo estudio y que pum active eso"). Liviano: 2D, sin Three.js, sin bucles.
+   - **Escenas** (`sistema/escenas.rs`, `escenas.json`): tarjetas grandes de un toque con el paso en curso, "Listo" o qué paso falló. Pasos: brillo, conectar, desconectar, salida de sonido, volumen, micrófono, modo trabajo (solo Mac), abrir una app y luces (a la espera: nunca se ejecuta). La primera vez: Modo estudio, remoto, noche y reunión, con los aparatos que haya. También en el submenú "Escenas" del ícono.
+   - **Mapa** (`sistema/setup.rs`, `setup.json`): un escritorio de frente por lugar (Casa = la Mac, Oficina = el PC) con pared, mesa y tres capas de profundidad, y las fotos reales de los aparatos y de la decoración (`static/setup`). Verde y resplandor si está encendido; tenue si no. El otro equipo llega por XDrop (`GET /nexo/aparatos`, misma seguridad); si está apagado, lo último que se vio queda tenue (`setup-visto.json`). "Editar mi setup": arrastrar, capas, tamaño, quitar y sumar lo detectado o decoración.
+   - Para revisarlo fuera de la app: `?seccion=setup`, con `&setup=editar`, `apagada`, `sin` o `fallo`.
 2. **Dispositivos** (el orden importa, pedido del dueño)
    - Al centro, "Mis dispositivos", tarjetas grandes con foto, nombre, estado y chevron, y al final "+ Agregar dispositivo", que abre Ajustes › Bluetooth porque el emparejamiento lo hace el sistema.
    - **Panel a la derecha, de arriba abajo:**
@@ -196,10 +202,13 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
        - General: batería, controles de audio y conexión.
        - Audio: el panel de sonido completo.
        - Avanzado: automático, información, Renombrar y Olvidar.
-3. **Audio**
-   - **Salida y entrada del sistema**, elegidas con un menú propio de todos los aparatos de sonido, no solo Bluetooth.
-   - Volúmenes y silencio.
-   - Avisos de calidad (el micrófono Bluetooth baja la calidad).
+3. **Audio** (un mezclador, rehecho el 3 nov: el dueño lo quería "en una barra vertical y más cositas")
+   - **Mezclador:** tiras verticales para la salida en uso, el micrófono en uso y, en Mac, los avisos del sistema. Cada tira: foto o ícono (`fotoDeSonido` en `catalogo.ts`), nombre, cómo se conecta, el % en grande, una barra vertical (`DeslizadorVertical.svelte`, con teclado) y el silencio al pie. Las tiras comparten filas (subgrid), así las barras quedan alineadas.
+   - Mientras se arrastra una barra, y 900 ms después, no se sigue lo que llega del sistema (`CanalAudio.svelte`). Se manda siempre el último valor.
+   - **"Silenciar todo"** silencia la salida y el micrófono en uso.
+   - **Aparatos:** salidas y entradas como tarjetas; tocar una la vuelve la del sistema. La que está en uso va con el estilo de "lo elegido". Abajo, "Probar sonido" (Mac: Tink con `afplay`; Windows: `MessageBeep`) y los ajustes de sonido del sistema.
+   - **Volumen de avisos** (solo Mac): `osascript` con límite de tiempo, leído al entrar y al volver a la ventana. Es una parte del volumen general.
+   - Avisos de calidad (el micrófono Bluetooth baja la calidad), con un botón para pasar al micrófono integrado. Nada pide el permiso de micrófono: no hay medidores en vivo.
 4. **Pantallas**
    - Cada pantalla con brillo, resolución, frecuencia, cuál es la principal y su posición.
    - El atajo de teclas de brillo.
@@ -215,12 +224,12 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - **Portapapeles liviano:** durante la sesión, las imágenes grandes se reducen a 1600 px antes de que RustDesk las mande. Historial de 12 copias, sin contraseñas.
    - **Durante la sesión:** la Mac no se duerme (`caffeinate -s -w`) y el brillo baja al mínimo; al terminar, todo vuelve como estaba.
    - **Permiso nuevo y obligatorio:** Grabación de pantalla.
-6. **Drop** (Nexo Drop, escrito el 3 nov): pasar archivos, carpetas, textos y enlaces entre la Mac y el PC por Tailscale.
-   - **Receptor** (`sistema/drop/servidor.rs`): escucha solo en la dirección de Tailscale del equipo, puerto 47821, y solo atiende a equipos del mismo dueño en Tailscale (y al mismo equipo, para probar). Lo recibido queda en Descargas › Nexo Drop; el texto va al portapapeles y los enlaces se abren en el navegador.
-   - **Envío** (`sistema/drop/envio.rs`): un lote a la vez, con avance, velocidad, tiempo restante y Cancelar. Se suelta sobre cualquier parte de la ventana (o sobre el widget) y lleva a Drop.
-   - **Acciones rápidas:** "Enviar lo que copiaste" (texto, imagen o archivos copiados), "Abrir un enlace allá" y "Abrir carpeta Nexo Drop".
+6. **XDrop** (antes Nexo Drop; escrito el 3 nov y renombrado el mismo día): pasar archivos, carpetas, textos, enlaces y capturas entre la Mac y el PC por Tailscale. El id de la sección sigue siendo `drop`.
+   - **Receptor** (`sistema/drop/servidor.rs`): escucha solo en la dirección de Tailscale del equipo, puerto 47821, y solo atiende a equipos del mismo dueño en Tailscale (y al mismo equipo, para probar). Lo recibido queda en Descargas › XDrop (`drop::CARPETA`, igual en los dos sistemas); el texto va al portapapeles y los enlaces se abren en el navegador. Las notificaciones llevan el título "XDrop".
+   - **Envío** (`sistema/drop/envio.rs`): un lote a la vez, con avance, velocidad, tiempo restante y Cancelar. Se suelta sobre cualquier parte de la ventana (o sobre el widget) y lleva a XDrop.
+   - **Pantalla:** la zona para soltar es la protagonista y a su lado va el **riel de acciones** (`RielXDrop.svelte`), una columna de botones parejos: "Enviar lo que copiaste", "Abrir enlace allá" (abre su campo bajo la fila), "Enviar captura" (solo Mac: `drop_enviar_captura` usa la captura de zona de Remoto, en 1x), "Escribir una nota" (llega al portapapeles del otro equipo) y "Abrir carpeta XDrop". Para sumar una acción se agrega una fila a `acciones`. Con la ventana ancha y alta, todo cabe en la ventana: el riel reparte el alto en mosaicos y el historial se desplaza dentro de su panel.
    - **Historial** de 40 entradas (`drop.json`), con miniaturas, Abrir, Mostrar y Copiar.
-   - **Ajustes:** "Recibir archivos" y "Copiar imágenes recibidas al portapapeles" (los dos encendidos).
+   - **Ajustes**, detrás del engranaje de arriba a la derecha (`AjustesXDrop.svelte`): "Recibir archivos" y "Copiar imágenes recibidas al portapapeles" (los dos encendidos), la carpeta con "Abrir carpeta" y, en Windows, la nota del cortafuegos. Si la recepción está apagada, el engranaje lleva un punto ámbar.
 7. **Automatizaciones**
    - Reglas por aparato: "al conectar, usar para el sonido", "avisar con batería baja", "al conectar el monitor, poner brillo X".
    - Lista de reglas activas.

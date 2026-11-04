@@ -37,6 +37,8 @@ pub struct DispositivoAudio {
     pub volumen: Option<u8>,
     pub silenciado: Option<bool>,
     pub volumen_entrada: Option<u8>,
+    /// El micrófono está silenciado; `None` si el aparato no deja silenciarlo.
+    pub silenciado_entrada: Option<bool>,
     /// "integrado", "bluetooth", "usb", "hdmi", "displayport", "airplay", "virtual" u "otro".
     pub transporte: String,
 }
@@ -49,16 +51,17 @@ pub enum Cambio {
     Silenciar(bool),
     UsarMicrofono,
     VolumenMicrofono(u8),
+    SilenciarMicrofono(bool),
 }
 
 #[cfg(target_os = "macos")]
-pub use mac::{ajustar, ajustar_por_uid, estado, listar};
+pub use mac::{ajustar, ajustar_por_uid, estado, listar, poner_volumen_avisos, probar, volumen_avisos};
 
 #[cfg(windows)]
 #[path = "audio_windows.rs"]
 mod sistema;
 #[cfg(windows)]
-pub use sistema::{ajustar, ajustar_por_uid, estado, listar};
+pub use sistema::{ajustar, ajustar_por_uid, estado, listar, poner_volumen_avisos, probar, volumen_avisos};
 
 // En otros sistemas no hay sonido que controlar.
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -81,10 +84,28 @@ pub fn ajustar_por_uid(_uid: &str, _cambio: Cambio) -> Result<(), String> {
     Err("No disponible en este sistema".into())
 }
 
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn probar() -> Result<(), String> {
+    Err("No disponible en este sistema".into())
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn volumen_avisos() -> Option<u8> {
+    None
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn poner_volumen_avisos(_valor: u8) -> Result<(), String> {
+    Err("No disponible en este sistema".into())
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use super::{Cambio, DispositivoAudio, Sonido};
     use std::ffi::{c_char, c_void};
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
 
     type Objeto = u32;
 
@@ -271,6 +292,7 @@ mod mac {
                 escribir(SISTEMA, &dir(ENTRADA_PREDETERMINADA, GLOBAL, 0), id)
             }
             Cambio::VolumenMicrofono(v) => poner_volumen(entrada.ok_or_else(sin_microfono)?, ENTRADA, v as f32 / 100.0),
+            Cambio::SilenciarMicrofono(s) => escribir(entrada.ok_or_else(sin_microfono)?, &dir(SILENCIO, ENTRADA, 0), s as u32),
         };
         if ok { Ok(()) } else { Err("macOS no aceptó el cambio de sonido".into()) }
     }
@@ -334,6 +356,7 @@ mod mac {
                     volumen: salida.then(|| volumen(id, SALIDA)).flatten().map(porcentaje),
                     silenciado: salida.then(|| leer::<u32>(id, &dir(SILENCIO, SALIDA, 0))).flatten().map(|m| m != 0),
                     volumen_entrada: entrada.then(|| volumen(id, ENTRADA)).flatten().map(porcentaje),
+                    silenciado_entrada: entrada.then(|| leer::<u32>(id, &dir(SILENCIO, ENTRADA, 0))).flatten().map(|m| m != 0),
                     transporte: transporte(id).into(),
                 })
             })
@@ -353,5 +376,54 @@ mod mac {
             let _ = escribir(SISTEMA, &dir(SALIDA_AVISOS, GLOBAL, 0), id);
         }
         Ok(())
+    }
+
+    // ------------------------------------------------------------ Probar sonido y volumen de avisos
+
+    /// Corre un programa del sistema con un límite de tiempo. Si se pasa, lo cierra: nunca deja procesos.
+    /// Devuelve lo que escribió, solo si terminó bien.
+    fn correr(programa: &str, args: &[&str], limite: Duration) -> Option<String> {
+        let mut hijo =
+            Command::new(programa).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+        let fin = Instant::now() + limite;
+        let estado = loop {
+            match hijo.try_wait() {
+                Ok(Some(e)) => break Some(e),
+                Ok(None) if Instant::now() < fin => std::thread::sleep(Duration::from_millis(25)),
+                _ => {
+                    let _ = hijo.kill();
+                    let _ = hijo.wait();
+                    break None;
+                }
+            }
+        }?;
+        // La salida es corta: cabe entera en el tubo, así que se lee al terminar.
+        let mut texto = String::new();
+        hijo.stdout.take()?.read_to_string(&mut texto).ok()?;
+        estado.success().then_some(texto)
+    }
+
+    /// Suena "Tink" por la salida en uso (afplay usa la del sistema).
+    pub fn probar() -> Result<(), String> {
+        correr("/usr/bin/afplay", &["/System/Library/Sounds/Tink.aiff"], Duration::from_secs(4))
+            .map(|_| ())
+            .ok_or_else(|| "No pude reproducir el sonido de prueba".into())
+    }
+
+    /// El volumen de avisos y efectos (0–100), como lo da `get volume settings`:
+    /// "output volume:72, input volume:35, alert volume:100, output muted:false".
+    pub fn volumen_avisos() -> Option<u8> {
+        let texto = correr("/usr/bin/osascript", &["-e", "get volume settings"], Duration::from_secs(3))?;
+        let resto = texto.split("alert volume:").nth(1)?;
+        let cifra: String = resto.chars().take_while(|c| c.is_ascii_digit()).collect();
+        cifra.parse::<u16>().ok().map(|v| v.min(100) as u8)
+    }
+
+    /// Cambia el volumen de avisos y efectos (es una parte del volumen general).
+    pub fn poner_volumen_avisos(valor: u8) -> Result<(), String> {
+        let orden = format!("set volume alert volume {}", valor.min(100));
+        correr("/usr/bin/osascript", &["-e", &orden], Duration::from_secs(3))
+            .map(|_| ())
+            .ok_or_else(|| "macOS no aceptó el volumen de avisos".into())
     }
 }

@@ -49,7 +49,12 @@
     | 'drop'
     | 'enviado'
     | 'recibido'
-    | 'archivo';
+    | 'archivo'
+    | 'campana'
+    | 'setup'
+    | 'bombilla'
+    | 'camara'
+    | 'chevron-arriba';
 </script>
 
 <script lang="ts">
@@ -225,5 +230,24 @@
   {:else if nombre === 'archivo'}
     <path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z" />
     <path d="M14 3.5V8h4.5" />
+  {:else if nombre === 'campana'}
+    <!-- Avisos y efectos del sistema -->
+    <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" />
+    <path d="M10 20.5a2.2 2.2 0 0 0 4 0" />
+  {:else if nombre === 'setup'}
+    <!-- Mi setup: un monitor sobre un escritorio -->
+    <rect x="6.5" y="3.5" width="11" height="8" rx="1.5" />
+    <path d="M12 11.5v3" />
+    <path d="M2.5 14.5h19" />
+    <path d="M4.5 14.5V20M19.5 14.5V20" />
+  {:else if nombre === 'bombilla'}
+    <path d="M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1v.6h5v-.6c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z" />
+    <path d="M9.5 19h5M10.5 21.5h3" />
+  {:else if nombre === 'camara'}
+    <!-- Cámara de video (reuniones) -->
+    <rect x="2.5" y="6.5" width="13" height="11" rx="2.2" />
+    <path d="M15.5 10.5l6-3.5v10l-6-3.5" />
+  {:else if nombre === 'chevron-arriba'}
+    <path d="M6 15l6-6 6 6" />
   {/if}
 </svg>

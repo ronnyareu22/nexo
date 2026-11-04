@@ -66,7 +66,7 @@
         <p class="titulo">Suelta para enviar a {destino.nombre}</p>
         <p class="detalle">
           {drop.cantidad === 1 ? '1 elemento' : drop.cantidad > 1 ? `${drop.cantidad} elementos` : 'Archivos o carpetas'} ·
-          llegan a Descargas › Nexo Drop
+          llegan a Descargas › XDrop
           {#if !destino.enLinea}<br /><span class="aviso">{destino.nombre} no responde: revisa que esté encendida y con Nexo abierto.</span>{/if}
         </p>
       {:else}

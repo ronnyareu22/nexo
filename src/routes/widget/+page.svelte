@@ -264,7 +264,7 @@
     }
     try {
       await enviarDrop(rutas, d.ip);
-      avisoSoltado(`Enviando a ${d.nombre}. Míralo en Nexo › Drop.`, 'ok');
+      avisoSoltado(`Enviando a ${d.nombre}. Míralo en Nexo › XDrop.`, 'ok');
     } catch (e) {
       avisoSoltado(String(e), 'aviso');
     }

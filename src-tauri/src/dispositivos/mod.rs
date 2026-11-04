@@ -153,6 +153,24 @@ async fn cambiar_audio(uid: String, cambio: audio::Cambio) -> Result<Vec<audio::
     .map_err(|e| e.to_string())?
 }
 
+/// "Probar sonido": un aviso corto por la salida en uso (Mac: Tink; Windows: el aviso del sistema).
+#[tauri::command]
+pub async fn probar_sonido() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(audio::probar).await.map_err(|e| e.to_string())?
+}
+
+/// Mac: el volumen de avisos y efectos (0–100). En Windows no hay uno aparte: `None`.
+#[tauri::command]
+pub async fn volumen_avisos() -> Option<u8> {
+    tauri::async_runtime::spawn_blocking(audio::volumen_avisos).await.ok().flatten()
+}
+
+/// Mac: cambia el volumen de avisos y efectos.
+#[tauri::command]
+pub async fn poner_volumen_avisos(valor: u8) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || audio::poner_volumen_avisos(valor)).await.map_err(|e| e.to_string())?
+}
+
 /// Pantallas conectadas y su brillo.
 #[tauri::command]
 pub async fn listar_pantallas(pantallas: State<'_, Arc<Pantallas>>) -> Result<Vec<Pantalla>, String> {
@@ -240,6 +258,25 @@ pub fn abrir_ajustes_bluetooth() -> Result<(), String> {
     // explorer abre la Configuración sin que se asome una ventana de consola.
     let r = std::process::Command::new("explorer").arg("ms-settings:bluetooth").spawn();
     r.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Abre los ajustes de sonido del sistema (Ajustes del Sistema › Sonido, o Configuración › Sonido).
+#[tauri::command]
+pub async fn abrir_ajustes_sonido() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(target_os = "macos")]
+        let r = std::process::Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.Sound-Settings.extension")
+            .status()
+            .map(|_| ());
+        #[cfg(windows)]
+        let r = std::process::Command::new("explorer").arg("ms-settings:sound").spawn().map(|_| ());
+        #[cfg(not(any(target_os = "macos", windows)))]
+        let r: std::io::Result<()> = Ok(());
+        r.map_err(|e| format!("No pude abrir los ajustes de sonido ({e})."))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------------------------------------------------------------- Cuenta del sistema

@@ -13,11 +13,11 @@
 //! Windows se guarda (Win+Tab, Win+D, Ctrl+Win+←/→, Win+Shift+S, Alt+Tab, Win+E): ver `remoto_windows`.
 //! La traducción de Ctrl → ⌘ la hace la Mac.
 
-// Nexo Drop (sistema/drop) también usa Tailscale, las imágenes y el portapapeles.
+// XDrop (sistema/drop) también usa Tailscale, las imágenes, el portapapeles y la captura.
 pub(super) mod tailscale;
 
 #[cfg(target_os = "macos")]
-mod captura;
+pub(super) mod captura;
 #[cfg(target_os = "macos")]
 pub(super) mod imagen;
 #[cfg(target_os = "macos")]

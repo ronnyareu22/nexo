@@ -41,3 +41,18 @@ export function modeloDe(d: Dispositivo): Modelo | null {
   }
   return porNombre.find((m) => m.patron.test(d.nombre))?.modelo ?? null;
 }
+
+// Aparatos de sonido (página Audio): el sistema solo da su nombre ("WH-CH520", "Bocinas de MacBook Pro").
+const sonidos: { patron: RegExp; foto: string }[] = [
+  { patron: /wh-?ch520/i, foto: '/dispositivos/sony-wh-ch520.png' },
+  { patron: /beats\s*solo/i, foto: '/dispositivos/beats-solo3.png' },
+  { patron: /steren|mnt[-\s]?0?27/i, foto: '/dispositivos/steren-27.png' },
+];
+
+/** Foto de un aparato de sonido por su nombre. Las bocinas y el micrófono de la Mac son la MacBook Pro del dueño. */
+export function fotoDeSonido(nombre: string, transporte: string): string | null {
+  const conocida = sonidos.find((s) => s.patron.test(nombre));
+  if (conocida) return conocida.foto;
+  if (enMac && transporte === 'integrado' && /macbook/i.test(nombre)) return '/dispositivos/macbook-pro-14.png';
+  return null;
+}

@@ -155,6 +155,7 @@ fn aplicar(salida: Option<(&IMMDevice, &str)>, entrada: Option<(&IMMDevice, &str
         Cambio::Silenciar(s) => silenciar(salida.ok_or_else(sin_salida)?.0, s),
         Cambio::UsarMicrofono => predeterminar(entrada.ok_or_else(sin_microfono)?.1),
         Cambio::VolumenMicrofono(v) => poner_volumen(entrada.ok_or_else(sin_microfono)?.0, v),
+        Cambio::SilenciarMicrofono(s) => silenciar(entrada.ok_or_else(sin_microfono)?.0, s),
     };
     if ok { Ok(()) } else { Err("Windows no aceptó el cambio de sonido".into()) }
 }
@@ -221,6 +222,7 @@ pub fn listar() -> Vec<DispositivoAudio> {
                 volumen: if salida { nivel } else { None },
                 silenciado: if salida { mudo } else { None },
                 volumen_entrada: if salida { None } else { nivel },
+                silenciado_entrada: if salida { None } else { mudo },
                 transporte: tienda.as_ref().map_or("otro", transporte).into(),
                 salida,
                 entrada: !salida,
@@ -245,4 +247,25 @@ pub fn ajustar_por_uid(uid: &str, cambio: Cambio) -> Result<(), String> {
     let salida = win::es_salida(&aparato).ok_or_else(desconectado)?;
     let este = (&aparato, uid);
     aplicar(salida.then_some(este), (!salida).then_some(este), cambio)
+}
+
+// ---------------------------------------------------------------- Probar sonido y volumen de avisos
+
+/// Suena el aviso "Predeterminado" de Windows por la salida en uso.
+pub fn probar() -> Result<(), String> {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn MessageBeep(tipo: u32) -> i32;
+    }
+    const MB_OK: u32 = 0;
+    if unsafe { MessageBeep(MB_OK) } != 0 { Ok(()) } else { Err("Windows no pudo sonar el aviso".into()) }
+}
+
+/// En Windows los avisos siguen al volumen general: no hay uno aparte.
+pub fn volumen_avisos() -> Option<u8> {
+    None
+}
+
+pub fn poner_volumen_avisos(_valor: u8) -> Result<(), String> {
+    Err("En Windows los avisos siguen al volumen general.".into())
 }

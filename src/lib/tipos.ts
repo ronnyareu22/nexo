@@ -45,7 +45,8 @@ export type CambioSonido =
   | { accion: 'volumen'; valor: number }
   | { accion: 'silenciar'; valor: boolean }
   | { accion: 'usarMicrofono' }
-  | { accion: 'volumenMicrofono'; valor: number };
+  | { accion: 'volumenMicrofono'; valor: number }
+  | { accion: 'silenciarMicrofono'; valor: boolean };
 
 /** Cómo se conecta un aparato de sonido. */
 export type TransporteAudio =
@@ -75,6 +76,8 @@ export interface DispositivoAudio {
   silenciado: boolean | null;
   /** Volumen del micrófono 0–100; null si el aparato no lo deja leer. */
   volumenEntrada: number | null;
+  /** El micrófono está silenciado; null si el aparato no deja silenciarlo. */
+  silenciadoEntrada: boolean | null;
   transporte: TransporteAudio;
 }
 

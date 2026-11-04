@@ -23,8 +23,8 @@ use tauri::{
 };
 
 /// Las secciones del panel (las mismas de `src/routes/+page.svelte`).
-const SECCIONES: [&str; 8] =
-    ["inicio", "dispositivos", "audio", "pantallas", "remoto", "drop", "automatizaciones", "ajustes"];
+const SECCIONES: [&str; 9] =
+    ["inicio", "setup", "dispositivos", "audio", "pantallas", "remoto", "drop", "automatizaciones", "ajustes"];
 
 /// Adónde abrir el panel: una sección y, en Dispositivos, la página de un aparato.
 #[derive(Serialize, Clone, Debug)]
@@ -191,6 +191,9 @@ pub fn run() {
             dispositivos::dispositivos_audio,
             dispositivos::usar_dispositivo_audio,
             dispositivos::ajustar_dispositivo_audio,
+            dispositivos::probar_sonido,
+            dispositivos::volumen_avisos,
+            dispositivos::poner_volumen_avisos,
             dispositivos::nombre_usuario,
             dispositivos::listar_pantallas,
             dispositivos::poner_brillo,
@@ -203,6 +206,7 @@ pub fn run() {
             dispositivos::automatico,
             dispositivos::guardar_automatico,
             dispositivos::abrir_ajustes_bluetooth,
+            dispositivos::abrir_ajustes_sonido,
             sistema::leer_ajustes,
             sistema::usar_teclas_brillo,
             sistema::nivel_aviso,
@@ -233,6 +237,7 @@ pub fn run() {
             sistema::drop::drop_texto,
             sistema::drop::drop_enlace,
             sistema::drop::drop_enviar_portapapeles,
+            sistema::drop::drop_enviar_captura,
             sistema::drop::drop_historial,
             sistema::drop::drop_abrir,
             sistema::drop::drop_mostrar,
@@ -241,6 +246,13 @@ pub fn run() {
             sistema::drop::drop_abrir_carpeta,
             sistema::drop::drop_ajustes,
             sistema::drop::drop_ajustar,
+            sistema::setup::setup_estado,
+            sistema::setup::setup_mapa,
+            sistema::setup::setup_guardar_mapa,
+            sistema::escenas::escenas,
+            sistema::escenas::guardar_escena,
+            sistema::escenas::borrar_escena,
+            sistema::escenas::activar_escena,
             abrir_seccion,
         ])
         .setup(|app| {
@@ -274,8 +286,10 @@ pub fn run() {
                 sistema::widget::activo(app.handle()),
                 None::<&str>,
             )?;
+            // Mi setup: las escenas a un clic desde el ícono (el submenú se rehace cuando cambian).
+            let escenas = sistema::escenas::submenu(app.handle())?;
             let salir = MenuItem::with_id(app, "salir", "Salir de Nexo", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&abrir, &widget, &salir])?;
+            let menu = Menu::with_items(app, &[&abrir, &escenas, &widget, &salir])?;
             app.manage(sistema::widget::CasillaBandeja(widget));
 
             TrayIconBuilder::with_id("nexo")
@@ -288,6 +302,7 @@ pub fn run() {
                     "abrir" => abrir_panel(app, None),
                     "widget" => sistema::widget::alternar(app),
                     "salir" => app.exit(0),
+                    id if id.starts_with("escena:") => sistema::escenas::desde_bandeja(app, id),
                     _ => {}
                 })
                 .on_tray_icon_event(|icono, evento| {

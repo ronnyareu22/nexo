@@ -1,8 +1,10 @@
 <!--
-  Drop: archivos, carpetas, textos y enlaces entre tus equipos por Tailscale (Nexo Drop).
-  Arriba, a quién se manda: tu otro equipo con Nexo, si está en línea y su dirección (con un menú si hay más de uno).
-  Debajo, la zona para soltar (se ilumina mientras arrastras sobre la ventana), las acciones rápidas, lo que está
-  en curso con su avance y, al lado, el historial y los ajustes de este equipo.
+  XDrop: archivos, carpetas, textos, enlaces y capturas entre tus equipos por Tailscale (antes Nexo Drop).
+  Arriba, el título y el engranaje con los ajustes de este equipo (AjustesXDrop).
+  A la izquierda, a quién se manda (tu otro equipo con Nexo, si está en línea y su dirección, con un menú si hay
+  más de uno) y, debajo, la zona para soltar (la protagonista: se ilumina mientras arrastras sobre la ventana)
+  con el riel de acciones al lado (RielXDrop), lo que dicen esas acciones y lo que está en curso con su avance.
+  A la derecha, el historial. Con la ventana ancha y alta, todo cabe en la ventana y el historial se desplaza solo.
   Soltar en cualquier parte de la ventana también envía (CapaDrop.svelte).
   Los destinos se releen cada 10 s mientras se ve y al llegar algo; el avance llega por "drop-progreso".
   Superficies sólidas, el hover solo cambia el color y ningún texto se corta: todo baja de línea.
@@ -10,30 +12,27 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
-    abrirCarpetaDrop,
     abrirDrop,
-    ajustarDrop,
     alCambiarHistorialDrop,
     alProgresoDrop,
     borrarHistorialDrop,
     cancelarDrop,
     copiarDrop,
-    enviarCopiadoDrop,
-    enviarEnlaceDrop,
     esMac,
     leerAjustesDrop,
     leerEnviosDrop,
     leerHistorialDrop,
     mostrarDrop,
   } from '$lib/api-sistema';
-  import type { AjustesDrop, EntradaDrop, EstadoDrop, PlataformaEquipo, ProgresoDrop } from '$lib/tipos-sistema';
+  import type { EntradaDrop, EstadoDrop, PlataformaEquipo, ProgresoDrop } from '$lib/tipos-sistema';
   import { destinoActual, drop, elegirDestino, leerDestinos } from '$lib/drop.svelte';
   import { cuando, duracion } from '$lib/tiempo';
   import { tooltip } from '$lib/tooltip';
   import Icono, { type Nombre } from '$lib/componentes/Icono.svelte';
-  import Interruptor from '$lib/componentes/Interruptor.svelte';
   import MenuDesplegable from '$lib/componentes/MenuDesplegable.svelte';
   import Dialogo from '$lib/componentes/Dialogo.svelte';
+  import AjustesXDrop from '$lib/componentes/AjustesXDrop.svelte';
+  import RielXDrop from '$lib/componentes/RielXDrop.svelte';
 
   let { onerror }: { onerror: (texto: string) => void } = $props();
 
@@ -168,7 +167,7 @@
     cancelando = null;
   }
 
-  // --- Acciones rápidas ---
+  // --- Lo que dicen las acciones del riel (bajo la zona) ---
   type Tono = 'ok' | 'aviso';
   let resultado = $state<{ texto: string; tono: Tono } | null>(null);
   let temporizadorResultado: ReturnType<typeof setTimeout> | undefined;
@@ -176,52 +175,6 @@
     resultado = { texto, tono };
     clearTimeout(temporizadorResultado);
     temporizadorResultado = setTimeout(() => (resultado = null), 8000);
-  }
-
-  let enviandoCopiado = $state(false);
-  async function enviarCopiado() {
-    const d = destino;
-    if (!d || enviandoCopiado) return;
-    enviandoCopiado = true;
-    try {
-      const r = await enviarCopiadoDrop(d.ip);
-      if (r.tipo === 'texto') mostrarResultado(`Texto enviado: ya está en el portapapeles de ${d.nombre}.`, 'ok');
-      else if (r.tipo === 'imagen') mostrarResultado(`Enviando la imagen a ${d.nombre}.`, 'ok');
-      else mostrarResultado(`Enviando ${r.cantidad === 1 ? '1 elemento' : `${miles(r.cantidad)} elementos`} a ${d.nombre}.`, 'ok');
-      leerHistorial();
-    } catch (e) {
-      mostrarResultado(String(e), 'aviso');
-    }
-    enviandoCopiado = false;
-  }
-
-  let enlace = $state('');
-  let abriendoEnlace = $state(false);
-  async function abrirEnlace(evento: SubmitEvent) {
-    evento.preventDefault();
-    const d = destino;
-    const texto = enlace.trim();
-    if (!d || !texto || abriendoEnlace) return;
-    // "tailscale.com" también sirve: se le pone https://.
-    const url = /^https?:\/\//i.test(texto) ? texto : `https://${texto}`;
-    abriendoEnlace = true;
-    try {
-      await enviarEnlaceDrop(d.ip, url);
-      enlace = '';
-      mostrarResultado(`Listo: se abrió en ${d.nombre}.`, 'ok');
-      leerHistorial();
-    } catch (e) {
-      mostrarResultado(String(e), 'aviso');
-    }
-    abriendoEnlace = false;
-  }
-
-  async function abrirCarpeta() {
-    try {
-      await abrirCarpetaDrop();
-    } catch (e) {
-      onerror(String(e));
-    }
   }
 
   // --- Historial ---
@@ -303,28 +256,6 @@
     }
   }
 
-  // --- Ajustes de este equipo ---
-  let ocupado = $state<keyof AjustesDrop | null>(null);
-  async function ajustar(clave: keyof AjustesDrop, valor: boolean) {
-    if (!estado || ocupado) return;
-    ocupado = clave;
-    try {
-      estado = await ajustarDrop({ [clave]: valor });
-    } catch (e) {
-      onerror(String(e));
-    }
-    ocupado = null;
-  }
-
-  const ayudaRecibir = $derived.by(() => {
-    const e = estado;
-    if (!e) return '';
-    if (!e.ajustes.recibir) return 'Apagado: tus otros equipos no pueden mandarte nada.';
-    if (e.escuchando) return `Tus equipos pueden mandarte a ${e.nombre} (${e.escuchando}). Solo tus equipos en Tailscale.`;
-    if (e.tailscale === 'no instalado') return 'Instala Tailscale para recibir.';
-    return 'Se activa solo en cuanto Tailscale se conecte.';
-  });
-
   // --- Destino ---
   const opcionesDestino = $derived(
     drop.destinos.map((d) => ({
@@ -338,7 +269,7 @@
   const sinDestino = $derived.by((): { titulo: string; detalle: string } => {
     const ts = estado?.tailscale;
     if (ts === 'no instalado')
-      return { titulo: 'Falta Tailscale', detalle: 'Nexo Drop viaja por Tailscale: instálalo en tus dos equipos con la misma cuenta.' };
+      return { titulo: 'Falta Tailscale', detalle: 'XDrop viaja por Tailscale: instálalo en tus dos equipos con la misma cuenta.' };
     if (ts === 'detenido')
       return { titulo: 'Tailscale está desconectado', detalle: 'Conéctalo en este equipo para ver tus otros equipos.' };
     return {
@@ -389,117 +320,84 @@
   });
 </script>
 
-{#snippet ficha(icono: Nombre, activa: boolean)}
-  <span class="ficha" class:activa aria-hidden="true"><Icono nombre={icono} tamano={18} /></span>
-{/snippet}
-
 <div class="vista">
   <header class="cabecera">
-    <h1>Drop</h1>
-    <p>Pasa archivos, textos y enlaces a tu otro equipo por Tailscale, directo y sin nube.</p>
+    <div class="cabecera__textos">
+      <h1>XDrop</h1>
+      <p>Pasa archivos, textos, enlaces y capturas a tu otro equipo por Tailscale, directo y sin nube.</p>
+    </div>
+    <AjustesXDrop {estado} oncambio={(e) => (estado = e)} {onerror} />
   </header>
-
-  <!-- A quién se manda -->
-  {#if !drop.leidos}
-    <div class="silueta-destino vidrio" aria-busy="true"><span class="solo-lector">Buscando tus equipos…</span></div>
-  {:else}
-    <section class="destino vidrio" aria-labelledby="drop-destino">
-      <div class="ruta" class:viva={destino?.enLinea} class:apagada={!!destino && !destino.enLinea} aria-hidden="true">
-        <span class="nodo">
-          <span class="nodo__icono"><Icono nombre={iconoDe(plataformaPropia)} tamano={22} /></span>
-          <span class="nodo__nombre">{corto(plataformaPropia)}</span>
-        </span>
-        <span class="tramo">
-          <span class="tramo__linea"></span>
-          {#if destino}<span class="tramo__via">Tailscale</span>{/if}
-        </span>
-        <span class="nodo otro">
-          <span class="nodo__icono"><Icono nombre={destino ? iconoDe(destino.plataforma) : 'dispositivos'} tamano={22} /></span>
-          <span class="nodo__nombre">{destino ? corto(destino.plataforma) : 'Otro'}</span>
-        </span>
-      </div>
-
-      {#if destino}
-        <div class="destino__textos" role="status" aria-live="polite">
-          <p class="rotulo">Enviar a</p>
-          <h2 class="destino__nombre" id="drop-destino">{destino.nombre}</h2>
-          <p class="destino__estado">
-            <span class="punto {destino.enLinea ? 'ok' : 'aviso'}" aria-hidden="true"></span>
-            <span class={destino.enLinea ? 'ok' : 'aviso'}>{destino.enLinea ? 'En línea' : 'Apagada o sin Nexo'}</span>
-            <span class="destino__ip">{sistema(destino.plataforma)} · {destino.ip}</span>
-          </p>
-        </div>
-        {#if drop.destinos.length > 1}
-          <div class="destino__menu">
-            <MenuDesplegable
-              opciones={opcionesDestino}
-              valor={destino.ip}
-              etiqueta="Elegir a qué equipo enviar"
-              oncambio={elegirDestino}
-            />
-          </div>
-        {/if}
-      {:else}
-        <div class="destino__textos" role="status">
-          <h2 class="destino__nombre" id="drop-destino">{sinDestino.titulo}</h2>
-          <p class="destino__detalle">{sinDestino.detalle}</p>
-        </div>
-      {/if}
-    </section>
-  {/if}
 
   <div class="columnas">
     <div class="columna">
-      <!-- Zona para soltar: se ilumina mientras hay un arrastre sobre la ventana -->
-      <section class="zona vidrio" class:encima={drop.arrastrando} aria-label="Zona para soltar archivos">
-        <span class="zona__icono" aria-hidden="true"><Icono nombre="drop" tamano={30} /></span>
-        <p class="zona__titulo">
-          {drop.arrastrando && destino ? `Suelta para enviar a ${destino.nombre}` : 'Arrastra archivos o carpetas aquí'}
-        </p>
-        <p class="zona__detalle">
-          {destino ? `Llegan a Descargas › Nexo Drop en ${destino.nombre}` : 'Cuando tu otro equipo tenga Nexo abierto, llegarán a su carpeta Descargas.'}
-        </p>
-      </section>
-
-      <!-- Acciones rápidas -->
-      <div class="acciones">
-        <button class="accion vidrio" type="button" disabled={!destino || enviandoCopiado} aria-busy={enviandoCopiado} onclick={enviarCopiado}>
-          {@render ficha('portapapeles', !!destino)}
-          <span class="textos">
-            <span class="titulo">{enviandoCopiado ? 'Enviando…' : 'Enviar lo que copiaste'}</span>
-            <span class="ayuda">Texto, imagen o archivos copiados</span>
-          </span>
-        </button>
-        <button class="accion vidrio" type="button" onclick={abrirCarpeta}>
-          {@render ficha('carpeta', true)}
-          <span class="textos">
-            <span class="titulo">Abrir carpeta Nexo Drop</span>
-            <span class="ayuda">Lo que recibes queda en Descargas</span>
-          </span>
-        </button>
-        <form class="accion accion--enlace vidrio" onsubmit={abrirEnlace}>
-          {@render ficha('conectar', !!destino)}
-          <div class="textos">
-            <label class="titulo" for="drop-enlace">Abrir un enlace allá</label>
-            <span class="ayuda">Se abre en el navegador de {destino?.nombre ?? 'tu otro equipo'}</span>
-            <div class="campo-fila">
-              <input
-                id="drop-enlace"
-                class="campo"
-                type="text"
-                inputmode="url"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="https://"
-                bind:value={enlace}
-                disabled={!destino}
-              />
-              <button class="boton-primario" type="submit" disabled={!destino || !enlace.trim() || abriendoEnlace} aria-busy={abriendoEnlace}>
-                Abrir
-              </button>
-            </div>
+      <!-- A quién se manda -->
+      {#if !drop.leidos}
+        <div class="silueta-destino vidrio" aria-busy="true"><span class="solo-lector">Buscando tus equipos…</span></div>
+      {:else}
+        <section class="destino vidrio" aria-labelledby="drop-destino">
+          <div class="ruta" class:viva={destino?.enLinea} class:apagada={!!destino && !destino.enLinea} aria-hidden="true">
+            <span class="nodo">
+              <span class="nodo__icono"><Icono nombre={iconoDe(plataformaPropia)} tamano={22} /></span>
+              <span class="nodo__nombre">{corto(plataformaPropia)}</span>
+            </span>
+            <span class="tramo">
+              <span class="tramo__linea"></span>
+              {#if destino}<span class="tramo__via">Tailscale</span>{/if}
+            </span>
+            <span class="nodo otro">
+              <span class="nodo__icono"><Icono nombre={destino ? iconoDe(destino.plataforma) : 'dispositivos'} tamano={22} /></span>
+              <span class="nodo__nombre">{destino ? corto(destino.plataforma) : 'Otro'}</span>
+            </span>
           </div>
-        </form>
+
+          {#if destino}
+            <div class="destino__textos" role="status" aria-live="polite">
+              <p class="rotulo">Enviar a</p>
+              <h2 class="destino__nombre" id="drop-destino">{destino.nombre}</h2>
+              <p class="destino__estado">
+                <span class="punto {destino.enLinea ? 'ok' : 'aviso'}" aria-hidden="true"></span>
+                <span class={destino.enLinea ? 'ok' : 'aviso'}>{destino.enLinea ? 'En línea' : 'Apagada o sin Nexo'}</span>
+                <span class="destino__ip">{sistema(destino.plataforma)} · {destino.ip}</span>
+              </p>
+            </div>
+            {#if drop.destinos.length > 1}
+              <div class="destino__menu">
+                <MenuDesplegable
+                  opciones={opcionesDestino}
+                  valor={destino.ip}
+                  etiqueta="Elegir a qué equipo enviar"
+                  oncambio={elegirDestino}
+                />
+              </div>
+            {/if}
+          {:else}
+            <div class="destino__textos" role="status">
+              <h2 class="destino__nombre" id="drop-destino">{sinDestino.titulo}</h2>
+              <p class="destino__detalle">{sinDestino.detalle}</p>
+            </div>
+          {/if}
+        </section>
+      {/if}
+
+      <!-- La zona para soltar (se ilumina mientras hay un arrastre sobre la ventana) y, al lado, el riel de acciones -->
+      <div class="heroe">
+        <section class="zona vidrio" class:encima={drop.arrastrando} aria-label="Zona para soltar archivos">
+          <span class="zona__icono" aria-hidden="true"><Icono nombre="drop" tamano={34} /></span>
+          <p class="zona__titulo">
+            {drop.arrastrando && destino ? `Suelta para enviar a ${destino.nombre}` : 'Arrastra archivos o carpetas aquí'}
+          </p>
+          <p class="zona__detalle">
+            {destino
+              ? `Llegan a Descargas › XDrop en ${destino.nombre}.`
+              : 'Cuando tu otro equipo tenga Nexo abierto, llegarán a su carpeta Descargas › XDrop.'}
+          </p>
+          <p class="zona__pista">También puedes soltarlos en cualquier parte de la ventana.</p>
+        </section>
+
+        <div class="heroe__riel">
+          <RielXDrop {destino} {estado} onresultado={mostrarResultado} onenviado={leerHistorial} {onerror} />
+        </div>
       </div>
 
       {#if resultado}
@@ -557,7 +455,7 @@
 
     <div class="columna">
       <!-- Historial -->
-      <section class="panel vidrio" aria-labelledby="drop-historial">
+      <section class="panel historial vidrio" aria-labelledby="drop-historial">
         <div class="historial-cabeza">
           <h2 class="rotulo" id="drop-historial">Historial</h2>
           {#if historial?.length}
@@ -570,7 +468,10 @@
             {#each [0, 1, 2] as i (i)}<li class="entrada silueta"><span class="miniatura"></span><span class="linea"></span></li>{/each}
           </ul>
         {:else if historial.length === 0}
-          <p class="vacio">Todavía no hay envíos. Lo que mandes o te llegue aparece aquí.</p>
+          <div class="vacio">
+            <span class="vacio__icono" aria-hidden="true"><Icono nombre="reloj" tamano={20} /></span>
+            <p>Todavía no hay envíos. Lo que mandes o te llegue aparece aquí.</p>
+          </div>
         {:else}
           <ul class="lista">
             {#each historial as e (e.id)}
@@ -599,7 +500,7 @@
                   {#if e.estado === 'error' && e.error}
                     <p class="final aviso"><Icono nombre="alerta" tamano={14} /> {e.error}</p>
                   {:else if esArchivo(e) && e.direccion === 'recibido' && !e.existe && e.estado === 'completo'}
-                    <p class="meta">Ya no está en Nexo Drop: lo movieron o lo borraron.</p>
+                    <p class="meta">Ya no está en XDrop: lo movieron o lo borraron.</p>
                   {/if}
                 </div>
                 <div class="botones">
@@ -631,56 +532,14 @@
           </ul>
         {/if}
       </section>
-
-      <!-- Este equipo -->
-      <section class="panel vidrio" aria-labelledby="drop-ajustes">
-        <h2 class="rotulo" id="drop-ajustes">En este equipo</h2>
-        {#if estado}
-          {@const a = estado.ajustes}
-          <div class="fila">
-            {@render ficha('recibido', a.recibir && !!estado.escuchando)}
-            <div class="textos">
-              <div class="titulo">Recibir archivos</div>
-              <div class="ayuda">{ayudaRecibir}</div>
-            </div>
-            <Interruptor
-              encendido={a.recibir}
-              cargando={ocupado === 'recibir'}
-              etiqueta="Recibir archivos"
-              oncambio={() => ajustar('recibir', !a.recibir)}
-            />
-          </div>
-          <div class="fila">
-            {@render ficha('portapapeles', a.copiarImagenes)}
-            <div class="textos">
-              <div class="titulo">Copiar imágenes recibidas al portapapeles</div>
-              <div class="ayuda">Si llega una sola imagen, queda lista para pegar.</div>
-            </div>
-            <Interruptor
-              encendido={a.copiarImagenes}
-              cargando={ocupado === 'copiarImagenes'}
-              etiqueta="Copiar imágenes recibidas al portapapeles"
-              oncambio={() => ajustar('copiarImagenes', !a.copiarImagenes)}
-            />
-          </div>
-          {#if !esMac}
-            <p class="nota">
-              <Icono nombre="info" tamano={15} />
-              La primera vez, Windows puede preguntar si Nexo puede usar la red: permite el acceso en redes privadas.
-            </p>
-          {/if}
-        {:else}
-          <div class="fila silueta-fila" aria-busy="true"><span class="linea"></span></div>
-        {/if}
-      </section>
     </div>
   </div>
 </div>
 
 <Dialogo
   abierto={preguntandoBorrar}
-  titulo="¿Borrar el historial de Nexo Drop?"
-  descripcion="Solo se borra la lista. Los archivos que recibiste siguen en Descargas › Nexo Drop."
+  titulo="¿Borrar el historial de XDrop?"
+  descripcion="Solo se borra la lista. Los archivos que recibiste siguen en Descargas › XDrop."
   icono="papelera"
   tono="peligro"
   textoConfirmar="Borrar"
@@ -695,7 +554,17 @@
     flex-direction: column;
     gap: 20px;
     min-width: 0;
+    min-height: 100%;
     container-type: inline-size;
+  }
+  .cabecera {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .cabecera__textos {
+    flex: 1;
+    min-width: 0;
   }
   .cabecera h1 {
     margin: 0;
@@ -709,6 +578,7 @@
 
   /* ---------- Destino ---------- */
   .destino {
+    flex-shrink: 0;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
@@ -717,6 +587,7 @@
     border-radius: var(--radio-lg);
   }
   .silueta-destino {
+    flex-shrink: 0;
     height: 120px;
     border-radius: var(--radio-lg);
   }
@@ -857,27 +728,91 @@
     }
   }
 
-  /* ---------- Columnas ---------- */
-  .columnas,
-  .columna {
+  /* ---------- Columnas: a la izquierda destino, zona y riel; a la derecha el historial ---------- */
+  .columnas {
+    flex: 1;
     display: grid;
     gap: 16px;
-    align-content: start;
     min-width: 0;
+  }
+  .columna {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+    min-height: 0;
   }
   @container (min-width: 1040px) {
     .columnas {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    }
+  }
+
+  /* La zona (protagonista) y el riel de acciones a su lado, del mismo alto. */
+  .heroe {
+    flex: 1;
+    display: flex;
+    gap: 12px;
+    min-height: 0;
+  }
+  .heroe__riel {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 252px;
+  }
+  .heroe__riel > :global(.riel) {
+    flex: 1;
+  }
+  @container (max-width: 600px) {
+    .heroe {
+      flex-direction: column;
+    }
+    .heroe__riel {
+      width: auto;
+    }
+  }
+
+  /* Ventana ancha y alta: todo cabe en la ventana, la zona crece y el historial se desplaza dentro de su panel. */
+  @media (min-width: 1324px) and (min-height: 700px) {
+    .vista {
+      height: 100%;
+    }
+    .columnas {
+      min-height: 0;
+    }
+    /* El riel mide lo que mide la zona: es un contenedor de alto fijo (RielXDrop decide si van mosaicos). */
+    .heroe__riel {
+      container: riel / size;
+    }
+    .heroe__riel > :global(.riel) {
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .historial {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .historial > .lista {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      margin-right: -12px;
+      padding-right: 12px;
     }
   }
 
   /* ---------- Zona para soltar ---------- */
   .zona {
+    flex: 1;
     display: grid;
     justify-items: center;
     align-content: center;
     gap: 6px;
-    min-height: 220px;
+    min-width: 0;
+    min-height: 300px;
     padding: 32px 28px;
     border-radius: var(--radio-lg);
     text-align: center;
@@ -909,10 +844,10 @@
   .zona__icono {
     display: grid;
     place-items: center;
-    width: 64px;
-    height: 64px;
-    margin-bottom: 8px;
-    border-radius: 18px;
+    width: 76px;
+    height: 76px;
+    margin-bottom: 10px;
+    border-radius: 22px;
     color: var(--primario-texto);
     background: var(--elegido-bg);
     box-shadow: inset 0 0 0 1px var(--elegido-borde);
@@ -920,82 +855,27 @@
   .zona__titulo {
     margin: 0;
     font: var(--letra-panel);
-    font-size: 17px;
-    line-height: 24px;
+    font-size: 19px;
+    line-height: 26px;
+    letter-spacing: -0.015em;
     color: var(--texto);
     overflow-wrap: anywhere;
   }
   .zona__detalle {
     max-width: 420px;
     margin: 0;
-    font: var(--letra-pequena);
+    font: var(--letra-cuerpo);
     color: var(--texto-2);
     overflow-wrap: anywhere;
   }
-
-  /* ---------- Acciones rápidas ---------- */
-  .acciones {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-    gap: 12px;
-  }
-  .accion {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    margin: 0;
-    padding: 14px 16px;
-    border: 0;
-    border-radius: var(--radio-md);
-    color: var(--texto);
-    text-align: left;
-    transition: background-color var(--dur-color) ease;
-  }
-  .accion:disabled {
-    cursor: default;
-    opacity: 0.6;
-  }
-  .accion--enlace {
-    grid-column: 1 / -1;
-  }
-  .accion .textos {
-    display: grid;
-    gap: 1px;
-  }
-  .campo-fila {
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
-  }
-  .campo {
-    -webkit-appearance: none;
-    appearance: none;
-    flex: 1;
-    min-width: 0;
-    height: 36px;
-    padding: 0 12px;
-    border: 1px solid var(--borde);
-    border-radius: var(--radio-sm);
-    outline: none;
-    background: var(--superficie-inserto);
-    color: var(--texto);
-    font: inherit;
-    font-size: 13.5px;
-    user-select: text;
-    -webkit-user-select: text;
-    transition:
-      border-color var(--dur-color) ease,
-      box-shadow var(--dur-color) ease;
-  }
-  .campo::placeholder {
+  .zona__pista {
+    max-width: 420px;
+    margin: 6px 0 0;
+    font: var(--letra-pequena);
     color: var(--texto-3);
   }
-  .campo:focus {
-    border-color: var(--primario);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primario) 20%, transparent);
-  }
-  .campo:disabled {
-    opacity: 0.6;
+  .zona.encima .zona__pista {
+    visibility: hidden;
   }
 
   .resultado {
@@ -1003,6 +883,7 @@
     align-items: flex-start;
     gap: 8px;
     margin: -4px 0 0;
+    flex-shrink: 0;
     padding: 10px 12px;
     border-radius: var(--radio-sm);
     background: var(--superficie-elevada);
@@ -1023,26 +904,13 @@
 
   /* ---------- Paneles ---------- */
   .panel {
+    flex-shrink: 0;
     padding: 16px 20px 8px;
     border-radius: var(--radio-lg);
     min-width: 0;
   }
   .rotulo {
     margin: 0 0 4px;
-  }
-  .textos {
-    flex: 1;
-    min-width: 0;
-  }
-  .titulo {
-    font-weight: 600;
-  }
-  .ayuda {
-    margin: 2px 0 0;
-    font-size: 12.5px;
-    line-height: 18px;
-    color: var(--texto-2);
-    overflow-wrap: anywhere;
   }
   .ficha {
     display: grid;
@@ -1057,38 +925,6 @@
       background-color var(--dur-color) ease,
       color var(--dur-color) ease;
   }
-  .ficha.activa {
-    color: var(--primario-texto);
-    background: var(--elegido-bg);
-  }
-  .fila {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 60px;
-    padding: 12px 0;
-    border-top: 1px solid var(--borde);
-  }
-  .rotulo + .fila {
-    border-top: 0;
-  }
-  .nota {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 0 0 12px;
-    padding: 10px 12px;
-    border-radius: var(--radio-sm);
-    background: var(--superficie-elevada);
-    color: var(--texto-2);
-    font-size: 12.5px;
-    line-height: 18px;
-  }
-  .nota :global(svg) {
-    flex-shrink: 0;
-    margin-top: 1px;
-    color: var(--texto-3);
-  }
 
   .boton {
     flex-shrink: 0;
@@ -1100,8 +936,7 @@
   .boton:hover:not(:disabled) {
     background: var(--superficie-hover);
   }
-  .boton:disabled,
-  .boton-primario:disabled {
+  .boton:disabled {
     cursor: default;
     opacity: 0.6;
   }
@@ -1288,16 +1123,31 @@
     gap: 6px;
   }
   .vacio {
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    padding: 28px 12px 32px;
+    text-align: center;
+  }
+  .vacio__icono {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    background: var(--superficie-elevada);
+    color: var(--texto-3);
+  }
+  .vacio p {
+    max-width: 280px;
     margin: 0;
-    padding: 6px 0 14px;
     font-size: 12.5px;
     line-height: 18px;
     color: var(--texto-2);
   }
 
   /* ---------- Siluetas mientras carga (quietas) ---------- */
-  .entrada.silueta .linea,
-  .silueta-fila .linea {
+  .entrada.silueta .linea {
     flex: 1;
     max-width: 60%;
     height: 12px;
