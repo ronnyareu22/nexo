@@ -194,6 +194,53 @@ pub fn brillos(pantallas: State<'_, Arc<Pantallas>>) -> Vec<(u32, u8)> {
     pantallas.brillos()
 }
 
+/// Ajustes de un monitor externo: `{ minimo, capacidades, valores: {codigo: {actual, maximo}}, conLista }`.
+/// Lee el monitor por DDC/CI (la lista de capacidades, solo la primera vez): el panel lo pide al abrir la sección.
+#[tauri::command]
+pub async fn ajustes_monitor(pantallas: State<'_, Arc<Pantallas>>, id: u32) -> Result<pantallas::vcp::AjustesMonitor, String> {
+    let p = pantallas.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || p.ajustes_monitor(id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Cambia un ajuste del monitor (contraste, modo de color, entrada…) por su código VCP. Devuelve cómo quedó.
+#[tauri::command]
+pub async fn poner_vcp(
+    pantallas: State<'_, Arc<Pantallas>>,
+    id: u32,
+    codigo: u8,
+    valor: u16,
+) -> Result<pantallas::vcp::Valor, String> {
+    let p = pantallas.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || p.poner_vcp(id, codigo, valor))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Cambia el brillo mínimo (0–40 %) de un monitor externo y lo guarda. Devuelve el brillo en la escala de Nexo.
+#[tauri::command]
+pub async fn poner_minimo_brillo(
+    app: tauri::AppHandle,
+    pantallas: State<'_, Arc<Pantallas>>,
+    id: u32,
+    valor: u8,
+) -> Result<u8, String> {
+    let valor = valor.min(pantallas::vcp::MINIMO_TOPE);
+    let p = pantallas.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Se guarda solo si cambió (la barra manda varios valores seguidos).
+        if crate::sistema::ajustes::cargar(&app).minimos_brillo.get(&id) != Some(&valor) {
+            crate::sistema::ajustes::cambiar(&app, |a| {
+                a.minimos_brillo.insert(id, valor);
+            })?;
+        }
+        p.poner_minimo(id, valor)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Resoluciones y frecuencias que se pueden elegir en una pantalla (la actual viene marcada).
 #[tauri::command]
 pub async fn modos_pantalla(id: u32) -> Vec<ModoPantalla> {

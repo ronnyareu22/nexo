@@ -1,16 +1,20 @@
 <!-- Panel de una pantalla: a la izquierda la foto sobre un halo que brilla según el nivel; a la derecha el brillo
      en grande con su barra (el tono va de ámbar tenue a amarillo intenso), − y + y accesos rápidos.
-     Debajo: resolución, frecuencia y "Hacer principal".
+     Debajo: resolución, frecuencia, "Hacer principal", el widget de brillo de esta pantalla y, en los monitores
+     externos, "Ajustes del monitor" (brillo mínimo y lo que el monitor deja cambiar por DDC/CI).
      El cambio de modo lo confirma quien la usa (Pantallas.svelte), que vuelve al anterior si no se confirma. -->
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ponerBrillo } from '$lib/api';
   import { esMac } from '$lib/api-sistema';
   import { enviadorDelUltimo } from '$lib/enviador';
+  import { pasoDeBrillo, tonoDeBrillo } from '$lib/brillo';
   import type { Pantalla } from '$lib/tipos';
   import type { ModoPantalla } from '$lib/tipos-sistema';
   import { fotoDePantalla } from '$lib/catalogo';
+  import AjustesMonitor from './AjustesMonitor.svelte';
   import Ilustracion from './Ilustracion.svelte';
+  import Interruptor from './Interruptor.svelte';
   import Deslizador from './Deslizador.svelte';
   import Icono from './Icono.svelte';
   import MenuDesplegable from './MenuDesplegable.svelte';
@@ -24,6 +28,8 @@
     ocupada = false,
     onmodo,
     onprincipal,
+    widget = null,
+    onwidget,
   }: {
     pantalla: Pantalla;
     onerror: (texto: string) => void;
@@ -37,6 +43,9 @@
     ocupada?: boolean;
     onmodo?: (modo: ModoPantalla, que: 'resolucion' | 'frecuencia') => void;
     onprincipal?: () => void;
+    /** El widget de brillo de esta pantalla está encendido; null mientras no se sabe. */
+    widget?: boolean | null;
+    onwidget?: (activar: boolean) => void;
   } = $props();
 
   // --- Brillo: valor propio mientras lo cambias; si no, sigue al que llega del sistema (por ejemplo, con las teclas). ---
@@ -63,36 +72,18 @@
     ultimoToque = performance.now();
   }
   // − y +: al múltiplo de 10 anterior o siguiente (31 → 30 → 20…; 31 → 40).
-  const paso = (subir: boolean) =>
-    cambiarBrillo(subir ? (Math.floor(brillo / 10) + 1) * 10 : Math.floor((brillo - 1) / 10) * 10);
-  const rapidos = [
-    { valor: 5, nombre: 'Mínimo' },
+  const paso = (subir: boolean) => cambiarBrillo(pasoDeBrillo(brillo, subir));
+  // En los monitores externos el 0 % ya es su brillo mínimo (no parpadea); en la integrada, 0 la apagaría.
+  const rapidos = $derived([
+    { valor: p.interna ? 5 : 0, nombre: 'Mínimo' },
     { valor: 25, nombre: '25 %' },
     { valor: 50, nombre: '50 %' },
     { valor: 75, nombre: '75 %' },
     { valor: 100, nombre: 'Máximo' },
-  ];
+  ]);
 
   // El tono del brillo: ámbar tenue abajo, amarillo intenso arriba.
-  const paradas: [number, [number, number, number]][] = [
-    [0, [124, 74, 18]],
-    [40, [217, 119, 6]],
-    [75, [245, 158, 11]],
-    [100, [250, 204, 21]],
-  ];
-  const tono = $derived.by(() => {
-    const b = Math.max(0, Math.min(100, brillo));
-    for (let i = 1; i < paradas.length; i++) {
-      const [b0, c0] = paradas[i - 1];
-      const [b1, c1] = paradas[i];
-      if (b <= b1) {
-        const t = (b - b0) / (b1 - b0);
-        const c = c0.map((v, k) => Math.round(v + (c1[k] - v) * t));
-        return `rgb(${c[0]} ${c[1]} ${c[2]})`;
-      }
-    }
-    return 'rgb(250 204 21)';
-  });
+  const tono = $derived(tonoDeBrillo(brillo));
   const nivel = $derived(
     brillo <= 15 ? 'Muy tenue' : brillo <= 40 ? 'Tenue' : brillo <= 70 ? 'Medio' : brillo <= 90 ? 'Alto' : 'Al máximo',
   );
@@ -278,6 +269,20 @@
         </div>
         <button class="boton-vidrio boton" type="button" disabled={ocupada} onclick={onprincipal}>Hacer principal</button>
       </div>
+    {/if}
+
+    {#if conBrillo && onwidget && widget !== null}
+      <div class="fila">
+        <div class="textos">
+          <span class="fila__rotulo">Widget de brillo en esta pantalla</span>
+          <span class="ayuda">Una tarjeta chica en el escritorio con el brillo de esta pantalla.</span>
+        </div>
+        <Interruptor encendido={widget} etiqueta="Widget de brillo en {p.nombre}" oncambio={() => onwidget(!widget)} />
+      </div>
+    {/if}
+
+    {#if !p.interna && p.controlable}
+      <AjustesMonitor pantalla={p} {onerror} />
     {/if}
   </div>
 </article>

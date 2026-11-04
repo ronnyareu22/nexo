@@ -251,3 +251,34 @@ export type ArrastreArchivos =
   | { tipo: 'encima'; rutas: string[] }
   | { tipo: 'fuera' }
   | { tipo: 'soltar'; rutas: string[] };
+
+// --- Ajustes del monitor (DDC/CI) y widgets de brillo ---
+
+/** Un ajuste que el monitor tiene (código VCP). `valores`: las opciones, solo en los que se eligen de una lista. */
+export interface CapacidadMonitor {
+  codigo: number;
+  valores: number[];
+}
+
+/** Valor actual y máximo de un código, en unidades del monitor. */
+export interface ValorVcp {
+  actual: number;
+  maximo: number;
+}
+
+/** Lo que muestra "Ajustes del monitor". */
+export interface AjustesMonitor {
+  /** Brillo mínimo (0–40 % del monitor): el 0 % de Nexo, para que no parpadee. */
+  minimo: number;
+  capacidades: CapacidadMonitor[];
+  /** Código → valor actual y máximo (solo de lo que respondió). Las claves llegan como texto. */
+  valores: Record<number, ValorVcp>;
+  /** El monitor dio su lista de capacidades (si no, solo están los controles que respondieron). */
+  conLista: boolean;
+}
+
+/** Aviso del hilo de pantallas: cambió el brillo de una pantalla (escala de Nexo, 0–100). */
+export interface CambioBrillo {
+  id: number;
+  nivel: number;
+}

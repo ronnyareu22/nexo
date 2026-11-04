@@ -10,7 +10,7 @@
 //!   y avisan cómo salieron con una notificación.
 //! - Sin atajos globales nuevos: en la Mac la captura ya tiene F13.
 
-use super::{ajustes, aviso, drop as xdrop, escenas, remoto, teclas, widget};
+use super::{ajustes, aviso, drop as xdrop, escenas, remoto, teclas, widget, widget_brillo};
 use crate::dispositivos::audio::{self, Cambio, DispositivoAudio};
 use crate::dispositivos::historial::Historial;
 use crate::dispositivos::pantallas::{Pantalla, Pantallas};
@@ -134,7 +134,7 @@ pub fn actualizar(app: &AppHandle) {
 }
 
 /// Igual, pero vuelve a poner todas las marcas: al hacer clic en una casilla, el sistema ya la cambió solo.
-fn actualizar_marcas(app: &AppHandle) {
+pub(super) fn actualizar_marcas(app: &AppHandle) {
     FORZAR.store(true, Ordering::SeqCst);
     actualizar(app);
 }
@@ -217,6 +217,8 @@ struct Datos {
     sonido: Vec<DispositivoAudio>,
     /// La pantalla del brillo.
     pantalla: Option<Pantalla>,
+    /// Las pantallas que dejan cambiar el brillo, para sus widgets: (id, nombre, widget encendido).
+    widgets: Vec<(u32, String, bool)>,
     aparatos: Option<(bool, Vec<Dispositivo>)>,
     ocupados: Vec<(String, bool)>,
 }
@@ -232,6 +234,7 @@ impl Datos {
             destinos: Vec::new(),
             sonido: Vec::new(),
             pantalla: None,
+            widgets: Vec::new(),
             aparatos: None,
             ocupados: Vec::new(),
         }
@@ -239,14 +242,22 @@ impl Datos {
 
     /// Todo lo que se lee es rápido (sin abrir programas): el sonido, el brillo y lo guardado.
     fn leer(app: &AppHandle) -> Self {
-        let pantalla = app.try_state::<Arc<Pantallas>>().and_then(|p| elegir_pantalla(p.listar()));
+        let lista = app.try_state::<Arc<Pantallas>>().map(|p| p.listar()).unwrap_or_default();
         let guardados = ajustes::cargar(app);
+        let encendidos: Vec<u32> = guardados.widgets_brillo.iter().map(|w| w.pantalla_id).collect();
+        let widgets = lista
+            .iter()
+            .filter(|p| p.controlable)
+            .map(|p| (p.id, p.nombre.clone(), encendidos.contains(&p.id)))
+            .collect();
+        let pantalla = elegir_pantalla(lista);
         Datos {
             f13: cfg!(target_os = "macos") && guardados.remoto.captura && teclas::permiso_concedido(),
             teclas_brillo: cfg!(windows) && guardados.teclas_brillo,
             destinos: xdrop::destinos_en_linea(),
             sonido: audio::listar(),
             pantalla,
+            widgets,
             aparatos: bloquear(&APARATOS).clone(),
             ocupados: bloquear(&OCUPADOS).clone(),
             ..Datos::vacios()
@@ -309,7 +320,7 @@ fn armar(d: &Datos) -> Vec<Pieza> {
 
     if let Some(p) = &d.pantalla {
         m.push(Pieza::Raya);
-        m.push(brillo(p, d.windows && d.teclas_brillo));
+        m.push(brillo(p, d.windows && d.teclas_brillo, &d.widgets));
     }
 
     let aparatos = aparatos(d);
@@ -380,7 +391,8 @@ fn sonido(lista: &[DispositivoAudio]) -> Vec<Pieza> {
 }
 
 /// "Brillo: 40 %" con los niveles fijos y los pasos de 10. En Windows, con el atajo si está encendido.
-fn brillo(p: &Pantalla, atajo: bool) -> Pieza {
+/// Al final, una casilla "Widget de brillo: …" por pantalla que deja cambiarlo.
+fn brillo(p: &Pantalla, atajo: bool, widgets: &[(u32, String, bool)]) -> Pieza {
     let nivel = p.brillo;
     let mut hijos: Vec<Pieza> = [(0, "Mínimo"), (25, "25 %"), (50, "50 %"), (75, "75 %"), (100, "Máximo")]
         .into_iter()
@@ -389,6 +401,14 @@ fn brillo(p: &Pantalla, atajo: bool) -> Pieza {
     hijos.push(Pieza::Raya);
     hijos.push(Pieza::Item { id: "brillo-bajar".into(), texto: "Bajar 10 %".into(), activo: nivel != Some(0), atajo: None });
     hijos.push(Pieza::Item { id: "brillo-subir".into(), texto: "Subir 10 %".into(), activo: nivel != Some(100), atajo: None });
+    if !widgets.is_empty() {
+        hijos.push(Pieza::Raya);
+        hijos.extend(widgets.iter().map(|(id, nombre, marcada)| Pieza::Casilla {
+            id: format!("widget-brillo:{id}"),
+            texto: format!("Widget de brillo: {}", corto(nombre)),
+            marcada: *marcada,
+        }));
+    }
     let mut texto = nivel.map_or_else(|| "Brillo".to_string(), |n| format!("Brillo: {n} %"));
     if atajo {
         texto.push_str(" · Ctrl+Alt+F1/F2");
@@ -568,6 +588,11 @@ fn elegir(app: &AppHandle, id: &str) {
     match id {
         "abrir" => crate::abrir_panel(app, None),
         "widget" => widget::alternar(app),
+        _ if id.starts_with("widget-brillo:") => {
+            if let Some(pantalla) = id.strip_prefix("widget-brillo:").and_then(|n| n.parse::<u32>().ok()) {
+                widget_brillo::alternar(app, pantalla);
+            }
+        }
         "salir" => app.exit(0),
         _ if id.starts_with("escena:") => escenas::desde_bandeja(app, id),
         _ => {
@@ -893,6 +918,7 @@ mod pruebas {
                 controlable: true,
                 principal: true,
             }),
+            widgets: vec![(1, "Pantalla de la MacBook".into(), false), (2, "MNT-027".into(), true)],
             aparatos: Some((
                 true,
                 vec![
@@ -994,6 +1020,22 @@ mod pruebas {
             l[0].conectado = false;
         }
         assert!(!misma_forma(&antes, &armar(&datos)));
+    }
+
+    #[test]
+    fn bandeja_widgets_de_brillo_en_el_submenu() {
+        let m = armar(&mac_completa());
+        let Some(Pieza::Sub { hijos, .. }) = m.iter().find(|p| llave(p) == (2, "brillo")) else {
+            panic!("falta el submenú de brillo");
+        };
+        assert_eq!(texto_de(hijos, "widget-brillo:2"), Some("Widget de brillo: MNT-027"));
+        assert!(matches!(hijos.last(), Some(Pieza::Casilla { marcada: true, .. })));
+        // Sin pantallas que dejen cambiarlo, no hay casillas ni raya de más.
+        let m = armar(&Datos { widgets: Vec::new(), ..mac_completa() });
+        let Some(Pieza::Sub { hijos, .. }) = m.iter().find(|p| llave(p) == (2, "brillo")) else {
+            panic!("falta el submenú de brillo");
+        };
+        assert!(!hijos.iter().any(|h| matches!(h, Pieza::Casilla { .. })));
     }
 
     #[test]

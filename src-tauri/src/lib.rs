@@ -4,12 +4,13 @@
 //! - Clic en el ícono o doble clic en la app: abre el panel. Su menú tiene accesos rápidos (sistema/bandeja.rs).
 //! - Al cerrar el panel se destruye su ventana para liberar memoria; la app sigue en segundo plano.
 //! - El widget de escritorio (sistema/widget.rs) vive aparte y abre el panel en la sección de cada casilla.
+//! - Los widgets de brillo (sistema/widget_brillo.rs), uno por pantalla, siguen el aviso "brillo-cambio".
 
 mod dispositivos;
 mod sistema;
 
 use dispositivos::historial::{Evento, Historial};
-use dispositivos::pantallas::Pantallas;
+use dispositivos::pantallas::{Avisos, Pantallas};
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -109,6 +110,13 @@ async fn abrir_seccion(app: AppHandle, seccion: String, dispositivo: Option<Stri
     let _ = app.run_on_main_thread(move || abrir_panel(&a, destino));
 }
 
+/// Lo que llega a las ventanas cuando cambia el brillo de una pantalla.
+#[derive(Serialize, Clone)]
+struct CambioBrillo {
+    id: u32,
+    nivel: u8,
+}
+
 /// Huella de lo que muestra el widget: si cambia, se le avisa para que se ponga al día.
 fn huella(estado: &dispositivos::Estado) -> String {
     let mut h = format!("{}", estado.bluetooth_encendido);
@@ -206,6 +214,9 @@ pub fn run() {
             dispositivos::listar_pantallas,
             dispositivos::poner_brillo,
             dispositivos::brillos,
+            dispositivos::ajustes_monitor,
+            dispositivos::poner_vcp,
+            dispositivos::poner_minimo_brillo,
             dispositivos::modos_pantalla,
             dispositivos::cambiar_modo_pantalla,
             dispositivos::hacer_principal,
@@ -228,6 +239,8 @@ pub fn run() {
             sistema::usar_arranque,
             sistema::widget_activo,
             sistema::usar_widget,
+            sistema::widgets_brillo,
+            sistema::usar_widget_brillo,
             sistema::remoto::remoto_estado,
             sistema::remoto::remoto_ajustar,
             sistema::remoto::remoto_preparar,
@@ -276,12 +289,21 @@ pub fn run() {
                 let _ = a.run_on_main_thread(move || abrir_panel(&b, None));
             });
             // Pantallas: al cambiar el brillo con las teclas se muestra el aviso en ese monitor.
-            let manejador = app.handle().clone();
-            let pantallas = Arc::new(Pantallas::iniciar(Box::new(move |id, nivel| {
-                sistema::aviso::mostrar(&manejador, id, nivel);
-                // Y el "Brillo: 40 %" del menú del ícono (los toques seguidos se juntan).
-                sistema::bandeja::actualizar(&manejador);
-            })));
+            // Cualquier cambio de brillo llega a los widgets de brillo ("brillo-cambio").
+            // Cada monitor externo arranca con su brillo mínimo guardado (sin dato, 10 %).
+            let (manejador, otro) = (app.handle().clone(), app.handle().clone());
+            let avisos = Avisos {
+                tecla: Box::new(move |id, nivel| {
+                    sistema::aviso::mostrar(&manejador, id, nivel);
+                    // Y el "Brillo: 40 %" del menú del ícono (los toques seguidos se juntan).
+                    sistema::bandeja::actualizar(&manejador);
+                }),
+                cambio: Box::new(move |id, nivel| {
+                    let _ = otro.emit("brillo-cambio", CambioBrillo { id, nivel });
+                }),
+            };
+            let minimos = sistema::ajustes::cargar(app.handle()).minimos_brillo.into_iter().collect();
+            let pantallas = Arc::new(Pantallas::iniciar(avisos, minimos));
             app.manage(pantallas.clone());
             // Remoto (Mac): vigía de la sesión de RustDesk, atajos de Windows, captura con F13 y portapapeles liviano.
             sistema::remoto::iniciar(app.handle());
@@ -308,6 +330,7 @@ pub fn run() {
 
             abrir_panel(app.handle(), None);
             sistema::widget::iniciar(app.handle());
+            sistema::widget_brillo::iniciar(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

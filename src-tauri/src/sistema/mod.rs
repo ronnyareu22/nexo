@@ -3,6 +3,7 @@
 //! y Nexo Drop (archivos, textos y enlaces entre los equipos del dueño por Tailscale).
 //! Mi setup: el mapa de la casa y la oficina (`setup`) y las escenas de un toque (`escenas`).
 //! El ícono de la barra de menús o de la bandeja y sus accesos rápidos (`bandeja`).
+//! Los widgets de brillo de una sola pantalla (`widget_brillo`).
 //! Windows: actualizaciones desde la Mac (`actualizar`), una sola copia abierta (`instancia`), lo de la primera vez
 //! (`primer_inicio`) y el registro de fallos al arrancar (`fallos`).
 
@@ -23,6 +24,7 @@ pub mod remoto_windows;
 pub mod setup;
 pub mod teclas;
 pub mod widget;
+pub mod widget_brillo;
 pub mod widgets_mac;
 
 use crate::dispositivos::pantallas::Pantallas;
@@ -190,4 +192,19 @@ pub fn widget_activo(app: AppHandle) -> bool {
 #[tauri::command]
 pub async fn usar_widget(app: AppHandle, activar: bool) -> Result<bool, String> {
     widget::usar(&app, activar)
+}
+
+// ---------------------------------------------------------------- Widgets de brillo (uno por pantalla)
+
+/// Las pantallas que tienen su widget de brillo encendido.
+#[tauri::command]
+pub fn widgets_brillo(app: AppHandle) -> Vec<u32> {
+    widget_brillo::activos(&app)
+}
+
+/// Enciende o apaga el widget de brillo de una pantalla. Devuelve cómo quedó.
+/// Va en segundo plano: en Windows, crear una ventana desde un comando síncrono la traba.
+#[tauri::command]
+pub async fn usar_widget_brillo(app: AppHandle, id: u32, activar: bool) -> Result<bool, String> {
+    widget_brillo::usar(&app, id, activar)
 }

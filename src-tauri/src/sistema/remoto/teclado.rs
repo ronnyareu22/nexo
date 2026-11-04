@@ -58,6 +58,8 @@ static ULTIMA_COPIA: AtomicU64 = AtomicU64::new(0);
 static CTRL_GUARDADO: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 /// Ctrl se mandó como ⌘ (porque vino un atajo): al soltar Ctrl se suelta ⌘.
 static CTRL_COMO_COMANDO: AtomicBool = AtomicBool::new(false);
+/// Modificadores que RustDesk tiene abajo ahora (de su último aviso de modificadores).
+static MODS_RUSTDESK: AtomicU64 = AtomicU64::new(0);
 
 // Tipos de evento
 const TECLA_ABAJO: u32 = 10;
@@ -111,6 +113,9 @@ const OPCION_TECLA: u16 = 58;
 const OPCION_DER_TECLA: u16 = 61;
 const F13: u16 = 105;
 const INICIO: u16 = 115;
+const PAG_ARRIBA: u16 = 116;
+const SUPR: u16 = 117;
+const PAG_ABAJO: u16 = 121;
 const FIN: u16 = 119;
 const IZQUIERDA: u16 = 123;
 const DERECHA: u16 = 124;
@@ -198,7 +203,8 @@ extern "C" fn al_evento(proxy: *mut c_void, tipo: u32, evento: Evento, _datos: *
     }
     // SAFETY: evento de teclado válido mientras dura la llamada.
     let codigo = unsafe { CGEventGetIntegerValueField(evento, CAMPO_CODIGO) } as u16;
-    let banderas = unsafe { CGEventGetFlags(evento) };
+    let originales = unsafe { CGEventGetFlags(evento) };
+    let mut banderas = originales;
 
     // Imprimir pantalla del PC (F13): captura liviana. Nexo se queda con la tecla.
     if tipo != MODIFICADORES && codigo == F13 && super::CAPTURA.load(Ordering::Relaxed) {
@@ -210,6 +216,16 @@ extern "C" fn al_evento(proxy: *mut c_void, tipo: u32, evento: Evento, _datos: *
 
     let traduce = super::TRADUCIR.load(Ordering::Relaxed) && de_rustdesk(evento);
     if traduce {
+        if tipo == MODIFICADORES {
+            MODS_RUSTDESK.store(banderas & (SHIFT | CONTROL | OPCION | COMANDO), Ordering::Relaxed);
+        } else if matches!(codigo, IZQUIERDA | DERECHA | ARRIBA | ABAJO | INICIO | FIN | PAG_ARRIBA | PAG_ABAJO | SUPR) {
+            // RustDesk manda estas teclas sin los modificadores que tiene abajo (llega "→" en vez de "⌃→" o "⇧→"):
+            // se los pone, así funcionan ⌃← ⌃→ (escritorios), ⌃↑ (Mission Control) y ⇧+flechas (seleccionar).
+            banderas |= MODS_RUSTDESK.load(Ordering::Relaxed);
+        } else {
+            // Las demás teclas sí traen sus modificadores reales: sirven para corregir el recuerdo si quedó viejo.
+            MODS_RUSTDESK.store(banderas & (SHIFT | CONTROL | OPCION | COMANDO), Ordering::Relaxed);
+        }
         if let Some(resultado) = control_diferido(proxy, tipo, codigo, banderas, evento) {
             return resultado;
         }
@@ -221,11 +237,21 @@ extern "C" fn al_evento(proxy: *mut c_void, tipo: u32, evento: Evento, _datos: *
             nuevo_codigo = c;
             nuevas = b;
         }
+        // ⌃← ⌃→ (cambiar de escritorio) y ⌃↑ ⌃↓ (Mission Control): las flechas de RustDesk llegan sin la marca
+        // "fn / teclado numérico" de un teclado real y macOS no las reconoce. La marca va SOLO al presionar:
+        // la Mac recuerda las marcas de la última tecla, y si quedara al soltar, fn (🌐) se quedaría "pegada".
+        if matches!(nuevo_codigo, IZQUIERDA | DERECHA | ARRIBA | ABAJO) {
+            if tipo == TECLA_ABAJO && nuevas & BIT_CONTROL != 0 && nuevas & (BIT_COMANDO | BIT_OPCION) == 0 {
+                nuevas |= FLECHA;
+            } else if tipo == TECLA_ARRIBA {
+                nuevas &= !FLECHA;
+            }
+        }
     }
     if nuevo_codigo != codigo {
         unsafe { CGEventSetIntegerValueField(evento, CAMPO_CODIGO, nuevo_codigo as i64) };
     }
-    if nuevas != banderas {
+    if nuevas != originales {
         unsafe { CGEventSetFlags(evento, nuevas) };
     }
     // Las apps buscan los atajos por el carácter de la tecla: se pone el de la tecla nueva (⌘C es "c", no ⌃C).

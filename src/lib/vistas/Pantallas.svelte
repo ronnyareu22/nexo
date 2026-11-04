@@ -1,9 +1,11 @@
-<!-- Pantallas: cada pantalla con brillo, resolución, frecuencia y cuál es la principal; abajo, el atajo de brillo.
+<!-- Pantallas: cada pantalla con brillo, resolución, frecuencia, cuál es la principal, su widget de brillo y, en los
+     monitores externos, sus ajustes (brillo mínimo, color, contraste, entrada…); abajo, el atajo de brillo.
      Las pantallas y su brillo los lee quien la usa (cada 5 s y cada 250 ms) y llegan por `pantallas`.
      Al cambiar un modo se pregunta si mantenerlo; sin respuesta en 15 s, vuelve al anterior (como macOS). -->
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
   import { cambiarModoPantalla, hacerPrincipal, modosPantalla } from '$lib/api-sistema';
+  import { alCambiarWidgetsBrillo, leerWidgetsBrillo, usarWidgetBrillo } from '$lib/api-monitor';
   import type { Pantalla } from '$lib/tipos';
   import type { ModoPantalla, PantallaSistema } from '$lib/tipos-sistema';
   import TarjetaPantalla from '$lib/componentes/TarjetaPantalla.svelte';
@@ -103,6 +105,26 @@
     leerModos(pr.pantalla);
   }
 
+  // --- Widgets de brillo: cuáles están encendidos (null mientras no se sabe). También cambian desde el menú del ícono. ---
+  let widgets = $state<number[] | null>(null);
+
+  async function alternarWidget(p: Pantalla, activar: boolean) {
+    try {
+      const quedo = await usarWidgetBrillo(p.id, activar);
+      const otros = (widgets ?? []).filter((id) => id !== p.id);
+      widgets = quedo ? [...otros, p.id] : otros;
+    } catch (e) {
+      onerror(String(e));
+    }
+  }
+
+  onMount(() => {
+    leerWidgetsBrillo()
+      .then((w) => (widgets = w))
+      .catch(() => (widgets = []));
+    return alCambiarWidgetsBrillo((ids) => (widgets = ids));
+  });
+
   async function hacerla(p: Pantalla) {
     if (ocupada || prueba) return;
     ocupada = true;
@@ -135,7 +157,7 @@
 <div class="vista">
   <header class="cabecera">
     <h1>Pantallas</h1>
-    <p>Brillo, resolución y cuál es la principal.</p>
+    <p>Brillo, ajustes del monitor, resolución y cuál es la principal.</p>
   </header>
 
   {#if pantallas.length}
@@ -150,6 +172,8 @@
           ocupada={ocupada || !!prueba}
           onmodo={(m, que) => probar(p, m, que)}
           onprincipal={() => hacerla(p)}
+          widget={widgets ? widgets.includes(p.id) : null}
+          onwidget={(activar) => alternarWidget(p, activar)}
         />
       {/each}
     </div>

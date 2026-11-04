@@ -8,10 +8,13 @@
 //! - Resolución, frecuencia y pantalla principal: EnumDisplaySettingsExW y ChangeDisplaySettingsExW
 //!   (funciones sueltas: no tocan DDC, así que no pasan por el hilo).
 //!
+//! - Ajustes del monitor (contraste, color, entrada…): los mismos manejadores DDC, más su lista de capacidades
+//!   (GetCapabilitiesStringLength + CapabilitiesRequestAndCapabilitiesReply), leída una vez por monitor.
+//!
 //! El `id` de cada pantalla es una huella de la ruta del monitor que da Windows
 //! (\\?\DISPLAY#...): no cambia mientras siga conectado al mismo puerto.
 
-use super::{Aviso, ModoPantalla, Orden, Pantalla};
+use super::{Avisos, ModoPantalla, NO_RESPONDE, Orden, Pantalla, Sistema, minimo_en, vcp};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -20,8 +23,9 @@ use windows::Win32::Devices::Display::{
     DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_DEVICE_INFO_HEADER,
     DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
     DISPLAYCONFIG_OUTPUT_TECHNOLOGY_LVDS, DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED, DISPLAYCONFIG_PATH_INFO,
-    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY,
-    DestroyPhysicalMonitors, DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes,
+    CapabilitiesRequestAndCapabilitiesReply, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
+    DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY, DestroyPhysicalMonitors, DisplayConfigGetDeviceInfo, GetCapabilitiesStringLength,
+    GetDisplayConfigBufferSizes,
     GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR, GetVCPFeatureAndVCPFeatureReply,
     PHYSICAL_MONITOR, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig, SetVCPFeature,
 };
@@ -49,7 +53,7 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, MONITORINFOF_PRIMARY};
 use windows::core::{BOOL, BSTR, PCWSTR, w};
 
-const BRILLO_VCP: u8 = 0x10;
+const BRILLO_VCP: u8 = vcp::BRILLO;
 /// Un monitor que no respondió a DDC se vuelve a probar cada tanto (la persona puede activar DDC/CI en su menú).
 const REINTENTO_DDC: Duration = Duration::from_secs(30);
 /// Si WMI falla o no da el brillo, no se insiste en cada lectura.
@@ -72,9 +76,8 @@ struct Monitor {
     ruta: String,
     interna: bool,
     principal: bool,
-    /// Posición en el escritorio (para ordenar de izquierda a derecha).
-    izquierda: i32,
-    arriba: i32,
+    /// Dónde está en el escritorio, en píxeles (para ordenar de izquierda a derecha y ubicar widgets).
+    rect: RECT,
     /// Zona útil (sin la barra de tareas), en píxeles.
     trabajo: RECT,
 }
@@ -192,7 +195,6 @@ fn monitores() -> Vec<Monitor> {
             Some(d) if !d.ruta.is_empty() => huella(&d.ruta),
             _ => huella(&gdi),
         };
-        let r = info.monitorInfo.rcMonitor;
         lista.push(Monitor {
             id,
             hmonitor: h,
@@ -201,8 +203,7 @@ fn monitores() -> Vec<Monitor> {
             ruta: destino.map(|d| d.ruta.clone()).unwrap_or_default(),
             interna: destino.is_some_and(|d| d.interna),
             principal: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
-            izquierda: r.left,
-            arriba: r.top,
+            rect: info.monitorInfo.rcMonitor,
             trabajo: info.monitorInfo.rcWork,
         });
     }
@@ -232,6 +233,17 @@ pub struct AreaTrabajo {
     pub derecha: i32,
     pub abajo: i32,
     pub escala: f64,
+}
+
+/// Dónde está una pantalla en el escritorio, en píxeles físicos: x, y, ancho, alto (para el widget de brillo).
+pub fn limites(id: u32) -> Option<(f64, f64, f64, f64)> {
+    let r = buscar(id)?.rect;
+    (r.right > r.left && r.bottom > r.top).then_some((
+        r.left as f64,
+        r.top as f64,
+        (r.right - r.left) as f64,
+        (r.bottom - r.top) as f64,
+    ))
 }
 
 /// Para ubicar el aviso de brillo en la pantalla que cambió.
@@ -277,11 +289,13 @@ struct Control {
     via: Via,
     maximo: u32,
     actual: u32,
+    /// Brillo mínimo (0–40 %): el 0 % de Nexo. En la pantalla del portátil es 0.
+    minimo: u8,
 }
 
 impl Control {
     fn porcentaje(&self) -> u8 {
-        porcentaje(self.actual, self.maximo)
+        vcp::a_porcentaje(self.actual, self.minimo, self.maximo)
     }
 
     fn manejador(&self) -> Option<HANDLE> {
@@ -293,16 +307,14 @@ impl Control {
     }
 }
 
-fn porcentaje(valor: u32, maximo: u32) -> u8 {
-    ((valor as f32 / maximo.max(1) as f32) * 100.0).round().clamp(0.0, 100.0) as u8
-}
-
-fn leer_ddc(h: HANDLE, intentos: u32) -> Option<(u32, u32)> {
+/// Lee un código VCP: (actual, máximo). Si el monitor no contesta a tiempo, se reintenta.
+/// En el brillo el máximo tiene que ser mayor que 0; en los demás lo revisa `vcp`.
+fn leer_vcp(h: HANDLE, codigo: u8, intentos: u32) -> Option<(u32, u32)> {
     for intento in 0..intentos {
         let (mut actual, mut maximo) = (0u32, 0u32);
-        let ok = unsafe { GetVCPFeatureAndVCPFeatureReply(h, BRILLO_VCP, None, &mut actual, Some(&mut maximo as *mut u32)) };
-        if ok != 0 && maximo > 0 {
-            return Some((actual.min(maximo), maximo));
+        let ok = unsafe { GetVCPFeatureAndVCPFeatureReply(h, codigo, None, &mut actual, Some(&mut maximo as *mut u32)) };
+        if ok != 0 && (codigo != BRILLO_VCP || maximo > 0) {
+            return Some((if codigo == BRILLO_VCP { actual.min(maximo) } else { actual }, maximo));
         }
         if intento + 1 < intentos {
             std::thread::sleep(Duration::from_millis(50));
@@ -311,9 +323,9 @@ fn leer_ddc(h: HANDLE, intentos: u32) -> Option<(u32, u32)> {
     None
 }
 
-fn escribir_ddc(h: HANDLE, valor: u32) -> bool {
+fn escribir_vcp(h: HANDLE, codigo: u8, valor: u32) -> bool {
     for intento in 0..2 {
-        if unsafe { SetVCPFeature(h, BRILLO_VCP, valor) } != 0 {
+        if unsafe { SetVCPFeature(h, codigo, valor) } != 0 {
             return true;
         }
         if intento == 0 {
@@ -321,6 +333,24 @@ fn escribir_ddc(h: HANDLE, valor: u32) -> bool {
         }
     }
     false
+}
+
+/// La cadena de capacidades del monitor ("(prot(monitor)…vcp(02 04 10 12 14(05 08 0B)…)…)"). Es lenta: se pide una vez.
+fn capacidades_ddc(h: HANDLE) -> Option<String> {
+    for intento in 0..2 {
+        let mut largo = 0u32;
+        if unsafe { GetCapabilitiesStringLength(h, &mut largo) } != 0 && (1..=16_384).contains(&largo) {
+            let mut buf = vec![0u8; largo as usize];
+            if unsafe { CapabilitiesRequestAndCapabilitiesReply(h, &mut buf) } != 0 {
+                let fin = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+                return Some(String::from_utf8_lossy(&buf[..fin]).into_owned());
+            }
+        }
+        if intento == 0 {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    None
 }
 
 /// Abre los monitores físicos de una pantalla y se queda con el primero que responde a DDC.
@@ -338,8 +368,8 @@ fn abrir_ddc(h: HMONITOR, intentos: u32) -> Option<Control> {
         .0
         .iter()
         .enumerate()
-        .find_map(|(i, f)| leer_ddc(f.hPhysicalMonitor, intentos).map(|l| (i, l)))?;
-    Some(Control { via: Via::Ddc { hmonitor: h.0 as isize, fisicos, cual }, maximo, actual })
+        .find_map(|(i, f)| leer_vcp(f.hPhysicalMonitor, BRILLO_VCP, intentos).map(|l| (i, l)))?;
+    Some(Control { via: Via::Ddc { hmonitor: h.0 as isize, fisicos, cual }, maximo, actual, minimo: 0 })
 }
 
 /// "\\?\display#boe0812#4&2d4a&0&uid8388688#{...}" → "display\boe0812\4&2d4a&0&uid8388688"
@@ -585,22 +615,29 @@ fn poner_wmi(s: &IWbemServices, ruta: &str, valor: u8) -> windows::core::Result<
 
 // ---------------------------------------------------------------- Hilo de pantallas
 
-/// Lo que es del hilo de pantallas: los manejadores DDC y la conexión a WMI.
+/// Lo que es del hilo de pantallas: los manejadores DDC, la conexión a WMI, lo leído de cada monitor y sus mínimos.
 struct Estado {
     controles: HashMap<u32, Control>,
     /// Monitores que no respondieron a DDC y cuándo se probaron.
     fallidos: HashMap<u32, Instant>,
     wmi: Wmi,
+    /// Capacidades y máximos de cada monitor (se leen una vez; sobreviven a reabrir sus manejadores).
+    memorias: HashMap<u32, vcp::Memoria>,
+    /// Brillo mínimo guardado de cada monitor externo.
+    minimos: HashMap<u32, u8>,
 }
+
+const NO_ACEPTO: &str = "El monitor no aceptó el cambio. Revisa que DDC/CI siga activo en su menú.";
 
 impl Estado {
     /// Mira qué pantallas hay. Olvida las desconectadas (destruye sus manejadores), abre DDC solo en las nuevas
     /// y relee el brillo de la integrada por WMI (es rápido; DDC no se relee).
-    fn refrescar(&mut self) -> Vec<Monitor> {
+    fn buscar(&mut self) -> Vec<Monitor> {
         let lista = monitores();
         let activos: HashSet<u32> = lista.iter().map(|m| m.id).collect();
         self.controles.retain(|id, _| activos.contains(id));
         self.fallidos.retain(|id, _| activos.contains(id));
+        self.memorias.retain(|id, _| activos.contains(id));
 
         let mut internas: Vec<(u32, String)> = Vec::new();
         for m in &lista {
@@ -626,7 +663,13 @@ impl Estado {
                 None => 2,
             };
             match abrir_ddc(m.hmonitor, intentos) {
-                Some(c) => {
+                Some(mut c) => {
+                    c.minimo = minimo_en(&self.minimos, m.id);
+                    // Si quedó por debajo de su mínimo (ahí parpadea), sube al mínimo.
+                    let piso = vcp::piso(c.minimo, c.maximo);
+                    if c.actual < piso && c.manejador().is_some_and(|h| escribir_vcp(h, BRILLO_VCP, piso)) {
+                        c.actual = piso;
+                    }
                     self.controles.insert(m.id, c);
                     self.fallidos.remove(&m.id);
                 }
@@ -654,12 +697,13 @@ impl Estado {
             if let Some(c) = self.controles.get_mut(id) {
                 c.actual = l.brillo as u32;
             } else if let Some(r) = self.wmi.ruta_metodos(&l.instancia) {
-                self.controles.insert(*id, Control { via: Via::Wmi { ruta: r }, maximo: 100, actual: l.brillo as u32 });
+                let c = Control { via: Via::Wmi { ruta: r }, maximo: 100, actual: l.brillo as u32, minimo: 0 };
+                self.controles.insert(*id, c);
             }
         }
     }
 
-    fn listar(&self, monitores: &[Monitor]) -> Vec<Pantalla> {
+    fn listar_de(&self, monitores: &[Monitor]) -> Vec<Pantalla> {
         let mut orden: Vec<(&Monitor, Pantalla)> = monitores
             .iter()
             .map(|m| {
@@ -681,28 +725,24 @@ impl Estado {
             })
             .collect();
         // La integrada primero (como en Mac) y luego de izquierda a derecha.
-        orden.sort_by_key(|(m, _)| (!m.interna, m.izquierda, m.arriba));
+        orden.sort_by_key(|(m, _)| (!m.interna, m.rect.left, m.rect.top));
         orden.into_iter().map(|(_, p)| p).collect()
     }
 
-    /// Pone el brillo en unidades del monitor (0..=maximo). Devuelve el porcentaje final.
+    /// Pone el brillo en unidades del monitor (0..=maximo), nunca por debajo de su mínimo. Devuelve el nivel de Nexo.
     fn escribir(&mut self, id: u32, crudo: u32) -> Result<u8, String> {
         let Some(c) = self.controles.get_mut(&id) else {
             let interna = buscar(id).is_some_and(|m| m.interna);
-            return Err(if interna {
-                "No se puede cambiar el brillo de esta pantalla".into()
-            } else {
-                "Este monitor no responde. Activa DDC/CI en su menú.".into()
-            });
+            return Err(if interna { "No se puede cambiar el brillo de esta pantalla".into() } else { NO_RESPONDE.into() });
         };
-        let crudo = crudo.min(c.maximo);
+        let crudo = crudo.clamp(vcp::piso(c.minimo, c.maximo).min(c.maximo), c.maximo);
         let escrito = match &c.via {
             Via::Wmi { ruta } => {
                 let ruta = ruta.clone();
                 self.wmi.poner(&ruta, crudo.min(100) as u8)
             }
             Via::Ddc { .. } => match c.manejador() {
-                Some(h) if escribir_ddc(h, crudo) => Ok(()),
+                Some(h) if escribir_vcp(h, BRILLO_VCP, crudo) => Ok(()),
                 _ => Err(String::new()),
             },
         };
@@ -716,36 +756,101 @@ impl Estado {
         }
 
         // DDC falló: los manejadores pueden haber quedado viejos (cambió la configuración). Se piden de nuevo.
-        let anterior = porcentaje(crudo, c.maximo);
+        let minimo = c.minimo;
+        let anterior = vcp::a_porcentaje(crudo, minimo, c.maximo);
         self.controles.remove(&id);
         let reabierto = buscar(id).and_then(|m| abrir_ddc(m.hmonitor, 1));
-        let error = "El monitor no aceptó el cambio. Revisa que DDC/CI siga activo en su menú.";
         let Some(mut c) = reabierto else {
             self.fallidos.insert(id, Instant::now());
-            return Err(error.into());
+            return Err(NO_ACEPTO.into());
         };
-        let crudo = ((anterior as f32 / 100.0) * c.maximo as f32).round() as u32;
-        let listo = c.manejador().is_some_and(|h| escribir_ddc(h, crudo));
+        c.minimo = minimo;
+        let crudo = vcp::a_crudo(anterior, minimo, c.maximo);
+        let listo = c.manejador().is_some_and(|h| escribir_vcp(h, BRILLO_VCP, crudo));
         if listo {
             c.actual = crudo;
         }
         let final_ = c.porcentaje();
         self.controles.insert(id, c);
-        if listo { Ok(final_) } else { Err(error.into()) }
+        if listo { Ok(final_) } else { Err(NO_ACEPTO.into()) }
+    }
+
+    /// El manejador DDC de un monitor externo que responde.
+    fn manejador_ddc(&self, id: u32) -> Result<HANDLE, String> {
+        match self.controles.get(&id) {
+            Some(c) if matches!(c.via, Via::Ddc { .. }) => c.manejador().ok_or_else(|| NO_RESPONDE.to_string()),
+            Some(_) => Err("La pantalla del portátil no tiene estos ajustes.".into()),
+            None => Err(NO_RESPONDE.into()),
+        }
+    }
+}
+
+impl Sistema for Estado {
+    fn refrescar(&mut self) {
+        self.buscar();
+    }
+
+    fn listar(&mut self) -> Vec<Pantalla> {
+        let vistas = self.buscar();
+        self.listar_de(&vistas)
     }
 
     fn poner(&mut self, id: u32, valor: u8) -> Result<u8, String> {
-        let maximo = self.controles.get(&id).map(|c| c.maximo).unwrap_or(100);
-        let crudo = ((valor.min(100) as f32 / 100.0) * maximo as f32).round() as u32;
-        self.escribir(id, crudo)
+        let (maximo, minimo) = self.controles.get(&id).map(|c| (c.maximo, c.minimo)).unwrap_or((100, 0));
+        self.escribir(id, vcp::a_crudo(valor, minimo, maximo))
     }
 
     /// Sube o baja en pasos de 1/16 (como en Mac). Devuelve el nivel final.
     fn paso(&mut self, id: u32, pasos: i32) -> Option<u8> {
         let c = self.controles.get(&id)?;
-        let tramo = (c.maximo as f32 / 16.0).max(1.0);
-        let nuevo = (c.actual as f32 + pasos as f32 * tramo).round().clamp(0.0, c.maximo as f32) as u32;
-        self.escribir(id, nuevo).ok()
+        let crudo = vcp::a_crudo(vcp::paso(c.porcentaje(), pasos), c.minimo, c.maximo);
+        self.escribir(id, crudo).ok()
+    }
+
+    fn poner_minimo(&mut self, id: u32, minimo: u8) -> Result<u8, String> {
+        let minimo = minimo.min(vcp::MINIMO_TOPE);
+        self.minimos.insert(id, minimo);
+        self.manejador_ddc(id)?;
+        let c = self.controles.get_mut(&id).ok_or(NO_RESPONDE)?;
+        let nivel = c.porcentaje();
+        c.minimo = minimo;
+        let crudo = vcp::a_crudo(nivel, minimo, c.maximo);
+        self.escribir(id, crudo)
+    }
+
+    fn ajustes(&mut self, id: u32) -> Result<vcp::AjustesMonitor, String> {
+        let h = self.manejador_ddc(id)?;
+        let minimo = minimo_en(&self.minimos, id);
+        let memoria = self.memorias.entry(id).or_default();
+        Ok(vcp::leer_ajustes(memoria, minimo, || capacidades_ddc(h), |codigo| leer_vcp(h, codigo, 2)))
+    }
+
+    fn poner_vcp(&mut self, id: u32, codigo: u8, valor: u16) -> Result<vcp::Valor, String> {
+        let h = self.manejador_ddc(id)?;
+        // La primera vez se lee qué tiene el monitor (para no mandar algo que no ofrece).
+        if self.memorias.get(&id).is_none_or(|m| m.lista.is_none()) {
+            self.ajustes(id)?;
+        }
+        let memoria = self.memorias.get(&id).ok_or(NO_RESPONDE)?;
+        let crudo = vcp::validar(memoria, codigo, valor)?;
+        let maximo = memoria.maximos.get(&codigo).copied().unwrap_or(0);
+        if !escribir_vcp(h, codigo, crudo) {
+            return Err(NO_ACEPTO.into());
+        }
+        if codigo == vcp::FABRICA {
+            // El monitor tarda un momento en volver a sus valores; después se relee el brillo.
+            std::thread::sleep(Duration::from_millis(500));
+            if let (Some((actual, max)), Some(c)) = (leer_vcp(h, BRILLO_VCP, 2), self.controles.get_mut(&id)) {
+                c.maximo = max;
+                c.actual = actual;
+            }
+        }
+        Ok(vcp::Valor { actual: crudo.min(u16::MAX as u32) as u16, maximo: maximo.min(u16::MAX as u32) as u16 })
+    }
+
+    fn niveles(&self) -> HashMap<u32, u8> {
+        // También la pantalla del portátil: `brillos()` la lee al instante sin tocar DDC ni WMI.
+        self.controles.iter().map(|(id, c)| (*id, c.porcentaje())).collect()
     }
 }
 
@@ -753,82 +858,22 @@ pub(super) fn trabajador(
     rx: mpsc::Receiver<Orden>,
     controlables: Arc<Mutex<HashSet<u32>>>,
     brillos: Arc<Mutex<HashMap<u32, u8>>>,
-    aviso: Aviso,
+    avisos: Avisos,
+    minimos: HashMap<u32, u8>,
 ) {
     // COM para WMI en este hilo. S_FALSE (ya estaba) y RPC_E_CHANGED_MODE (otro modo) también sirven.
     let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     let com_listo = com.is_ok() || com == RPC_E_CHANGED_MODE;
 
-    let mut estado = Estado {
+    let estado = Estado {
         controles: HashMap::new(),
         fallidos: HashMap::new(),
         wmi: Wmi { com: com_listo, servicios: None, fallo: None },
+        memorias: HashMap::new(),
+        minimos,
     };
-    // En Windows la caché tiene todas las pantallas controlables (también la del portátil):
-    // `brillos()` la lee al instante sin tocar DDC ni WMI.
-    let publicar = |estado: &Estado| {
-        if let Ok(mut c) = controlables.lock() {
-            *c = estado.controles.keys().copied().collect();
-        }
-        if let Ok(mut b) = brillos.lock() {
-            *b = estado.controles.iter().map(|(id, c)| (*id, c.porcentaje())).collect();
-        }
-    };
-
-    while let Ok(primera) = rx.recv() {
-        // Igual que en Mac: se juntan los toques de teclas y, de los "poner brillo" seguidos, vale el último.
-        let mut pasos: HashMap<u32, i32> = HashMap::new();
-        let mut poner_ultimo: HashMap<u32, (u8, Vec<mpsc::Sender<Result<u8, String>>>)> = HashMap::new();
-        let mut otras = Vec::new();
-        for orden in std::iter::once(primera).chain(rx.try_iter()) {
-            match orden {
-                Orden::Paso(id, n) => *pasos.entry(id).or_default() += n,
-                Orden::PonerBrillo(id, valor, t) => {
-                    let e = poner_ultimo.entry(id).or_insert((valor, Vec::new()));
-                    e.0 = valor;
-                    e.1.push(t);
-                }
-                otra => otras.push(otra),
-            }
-        }
-        for (id, (valor, respuestas)) in poner_ultimo {
-            let r = estado.poner(id, valor);
-            publicar(&estado);
-            for t in respuestas {
-                let _ = t.send(r.clone());
-            }
-        }
-
-        // Varias listas o refrescos en cola: basta con mirar las pantallas una vez.
-        let mut vistas: Option<Vec<Monitor>> = None;
-        for orden in otras {
-            match orden {
-                Orden::Refrescar | Orden::Listar(_) if vistas.is_none() => {
-                    vistas = Some(estado.refrescar());
-                    publicar(&estado);
-                    if let Orden::Listar(t) = orden {
-                        let _ = t.send(estado.listar(vistas.as_deref().unwrap_or_default()));
-                    }
-                }
-                Orden::Listar(t) => {
-                    let _ = t.send(estado.listar(vistas.as_deref().unwrap_or_default()));
-                }
-                Orden::Refrescar | Orden::PonerBrillo(..) | Orden::Paso(..) => {}
-            }
-        }
-
-        for (id, n) in pasos {
-            if n == 0 {
-                continue;
-            }
-            if let Some(nivel) = estado.paso(id, n) {
-                publicar(&estado);
-                aviso(id, nivel);
-            }
-        }
-    }
-
-    drop(estado);
+    // `atender` es dueño del estado: al terminar lo suelta (destruye los manejadores) antes de cerrar COM.
+    super::atender(rx, estado, controlables, brillos, avisos);
     if com.is_ok() {
         unsafe { CoUninitialize() };
     }

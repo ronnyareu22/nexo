@@ -146,21 +146,21 @@ fn crear(app: &AppHandle) -> Result<(), String> {
 /// Mac ubica las ventanas en puntos y Windows en píxeles reales. Todo aquí va en esa unidad,
 /// así la posición sirve aunque las pantallas tengan escalas distintas.
 #[cfg(target_os = "macos")]
-fn a_nativa(p: PhysicalPosition<i32>, escala: f64) -> (i32, i32) {
+pub(super) fn a_nativa(p: PhysicalPosition<i32>, escala: f64) -> (i32, i32) {
     ((p.x as f64 / escala).round() as i32, (p.y as f64 / escala).round() as i32)
 }
 #[cfg(not(target_os = "macos"))]
-fn a_nativa(p: PhysicalPosition<i32>, _escala: f64) -> (i32, i32) {
+pub(super) fn a_nativa(p: PhysicalPosition<i32>, _escala: f64) -> (i32, i32) {
     (p.x, p.y)
 }
 
 /// Cuánto mide un punto en la unidad nativa de esa pantalla (1 en Mac; la escala en Windows).
-fn punto(m: &Monitor) -> f64 {
+pub(super) fn punto(m: &Monitor) -> f64 {
     if cfg!(target_os = "macos") { 1.0 } else { m.scale_factor() }
 }
 
 /// Lo útil de una pantalla (sin barra de menús, Dock ni barra de tareas): x, y, ancho, alto.
-fn area_util(m: &Monitor) -> (f64, f64, f64, f64) {
+pub(super) fn area_util(m: &Monitor) -> (f64, f64, f64, f64) {
     let a = m.work_area();
     // Tauri la da en píxeles con la escala de esa pantalla; en Mac se pasa a puntos.
     let e = if cfg!(target_os = "macos") { m.scale_factor() } else { 1.0 };
@@ -184,15 +184,16 @@ fn posicion_inicial(app: &AppHandle) -> Option<(f64, f64)> {
     Some((x + ancho - (ANCHO + MARGEN) * p, y + MARGEN * p))
 }
 
-/// Si en esa posición se ve una buena parte del widget en alguna pantalla.
-fn se_ve(app: &AppHandle, (x, y): (f64, f64)) -> bool {
+/// Si en esa posición se ve una buena parte de una ventana de ese tamaño (en puntos) en alguna pantalla.
+pub(super) fn se_ve(app: &AppHandle, (x, y): (f64, f64), (ancho, alto): (f64, f64)) -> bool {
     let Ok(pantallas) = app.available_monitors() else { return false };
+    let (ancho_min, alto_min) = ((ancho * 0.6).min(160.0), (alto * 0.6).min(80.0));
     pantallas.iter().any(|m| {
         let (ax, ay, aw, ah) = area_util(m);
         let p = punto(m);
-        let ancho = (x + ANCHO * p).min(ax + aw) - x.max(ax);
-        let alto = (y + ALTO * p).min(ay + ah) - y.max(ay);
-        ancho >= 160.0 * p && alto >= 80.0 * p
+        let visto_ancho = (x + ancho * p).min(ax + aw) - x.max(ax);
+        let visto_alto = (y + alto * p).min(ay + ah) - y.max(ay);
+        visto_ancho >= ancho_min * p && visto_alto >= alto_min * p
     })
 }
 
@@ -201,7 +202,7 @@ fn lugar(app: &AppHandle) -> Option<(f64, f64)> {
     ajustes::cargar(app)
         .widget_posicion
         .map(|(x, y)| (x as f64, y as f64))
-        .filter(|&p| se_ve(app, p))
+        .filter(|&p| se_ve(app, p, (ANCHO, ALTO)))
         .or_else(|| posicion_inicial(app))
 }
 

@@ -1,4 +1,5 @@
-<!-- Deslizador 0–100: pista hundida, relleno con el color de su familia y perilla blanca. Funciona con teclado. -->
+<!-- Deslizador (0–100, o 0–`maximo`): pista hundida, relleno con el color de su familia y perilla blanca.
+     Funciona con teclado. -->
 <script lang="ts">
   let {
     valor,
@@ -6,10 +7,13 @@
     color = 'celeste',
     apagado = false,
     tono,
+    maximo = 100,
     oncambio,
     ontocando,
   }: {
     valor: number;
+    /** Hasta dónde llega (de fábrica, 100). */
+    maximo?: number;
     etiqueta: string;
     /** celeste para sonido, amarillo para brillo, verde para batería y conexión, primario para lo demás */
     color?: 'celeste' | 'amarillo' | 'verde' | 'primario';
@@ -24,12 +28,12 @@
 <input
   type="range"
   min="0"
-  max="100"
+  max={maximo}
   step="1"
   value={valor}
   aria-label={etiqueta}
   class:apagado
-  style:--parte={valor / 100}
+  style:--parte={Math.max(0, Math.min(1, valor / (maximo || 1)))}
   style:--relleno={tono ?? `var(--${color})`}
   oninput={(e) => oncambio(Number(e.currentTarget.value))}
   onpointerdown={(e) => {

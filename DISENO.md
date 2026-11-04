@@ -28,7 +28,7 @@ Un centro de control nativo para **macOS y Windows** con el que se administran a
 
 ```
 src/                      Interfaz (no llama APIs del sistema; solo `lib/api.ts`)
-  routes/+page.svelte     Pantalla principal · routes/aviso/ aviso de brillo
+  routes/+page.svelte     Pantalla principal · routes/aviso/ aviso de brillo · routes/brillo/ widget de brillo
   lib/api.ts              Puente a Rust (y datos de ejemplo fuera de la app)
   lib/tipos.ts            Tipos compartidos con Rust
   lib/estilos/global.css  Tokens y temas
@@ -61,6 +61,9 @@ src-tauri/src/
 | Audio como mezclador: tiras verticales, silencio del micrófono, "Probar sonido" y volumen de avisos | ⚠️ escrito; el silencio del micrófono depende del aparato · avisos con `osascript` | ⚠️ escrito y compilado con cargo-xwin (sin volumen de avisos) |
 | Menú del ícono con accesos rápidos: captura de zona (F13), enviar por XDrop, escenas, salida y micrófono, silencio, brillo, conectar audífonos, remoto | ⚠️ escrito; el armado del menú tiene pruebas (`cargo test --lib bandeja`), sin probar en la app | ⚠️ escrito y compilado con cargo-xwin, sin probar (sin captura de zona) |
 | Mi setup: escenas de un toque (también en el menú del ícono) y el mapa editable de la casa y la oficina (`GET /nexo/aparatos` por XDrop) | ⚠️ escrito; lógica pura con pruebas (`cargo test --lib setup escenas`), sin probar con los aparatos ni entre los dos equipos | ⚠️ escrito y compilado con cargo-xwin, sin probar ("Modo remoto" abre RustDesk) |
+| Brillo mínimo por monitor externo (10 % de fábrica, 0–40 %): el 0 % de Nexo nunca baja de ahí, así no parpadea | ⚠️ ddc-macos, sin probar con el aparato | ⚠️ dxva2, compilado con cargo-xwin, sin probar con el Steren |
+| Ajustes del monitor por DDC/CI (contraste, modo de color, luz cálida, rojo/verde/azul, nitidez, modo de imagen, entrada, volumen, silencio, valores de fábrica), solo lo que el monitor dice que tiene | ⚠️ capacidades con el crate `ddc`, sin probar | ⚠️ `CapabilitiesRequestAndCapabilitiesReply`, sin probar |
+| Widget de brillo de una sola pantalla (`brillo-<id>`), desde la tarjeta de la pantalla o el submenú Brillo del ícono | ⚠️ escrito, sin probar | ⚠️ escrito y compilado con cargo-xwin, sin probar |
 
 **Medidas actuales:** la app pesa 4,5 MB y el proceso principal usa unos 27 MB. Con el panel abierto se suman unos 70 MB del motor web, que se liberan al cerrar el panel.
 
@@ -212,6 +215,9 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - Avisos de calidad (el micrófono Bluetooth baja la calidad), con un botón para pasar al micrófono integrado. Nada pide el permiso de micrófono: no hay medidores en vivo.
 4. **Pantallas**
    - Cada pantalla con brillo, resolución, frecuencia, cuál es la principal y su posición.
+   - **Brillo mínimo** (pedido del dueño el 4 nov: "si pongo en 0, queda parpadeando"): cada monitor externo tiene un mínimo (10 % de fábrica, de 0 a 40 %, en `ajustes.json › minimosBrillo`). El 0 % de Nexo es ese mínimo y el 100 % el máximo. Se aplica en un solo lugar, el hilo de pantallas (`dispositivos/pantallas.rs`), así vale para el panel, las teclas, el menú, las escenas y los widgets. Si al conectarlo el monitor estaba por debajo del mínimo, sube al mínimo.
+   - **Ajustes del monitor** (sección que se despliega en la tarjeta de cada monitor externo, `AjustesMonitor.svelte`; sin pestañas): el brillo mínimo y una rejilla con lo que el monitor dice que tiene en su lista de capacidades DDC/CI (`dispositivos/vcp.rs`, leída una vez por monitor): contraste (0x12), modo de color (0x14) con "Luz cálida" (el preset más cálido y vuelta al de antes), rojo, verde y azul (0x16/18/1A) en un modo "Usuario", nitidez (0x87), modo de imagen (0xDC), entrada (0x60, con confirmación), volumen (0x62), silencio (0x8D) y "Restaurar valores de fábrica" (0x04, con confirmación). Los valores se leen al abrir la sección, nunca en un bucle. Si el monitor no da su lista, solo se muestran los controles continuos que respondieron. Fuera de la app: `?seccion=pantallas&monitor=abierto`.
+   - **Widget de brillo en esta pantalla**: interruptor por pantalla (ver la sección 10).
    - El atajo de teclas de brillo.
 5. **Remoto** (hecho el 3 nov; el dueño controla la Mac desde la PC del trabajo con RustDesk por Tailscale)
    - **Estado:** quién está conectado, si va directo por Tailscale o por relé, y el estado de Tailscale y RustDesk en fichas. A la izquierda, la ilustración del PC y la Mac con Tailscale al medio (`remoto-conectado`, `remoto` o `remoto-sin`, del mismo generador).
@@ -302,6 +308,12 @@ El dueño los quiere **en los dos sistemas**. Hay tres niveles, que se hacen en 
    - Se actualiza cada 30 s o cuando el vigía avisa un cambio.
    - Archivos: `sistema/widget.rs` y `routes/widget`. Cuesta un webview más mientras está prendido.
 
+0b. **Widget de brillo de una sola pantalla (hecho el 4 nov, Mac y Windows; pedido del dueño para el Steren de la oficina):** una tarjeta de 260×96 por pantalla, con el sol, el nombre, el % en grande, la barra y − y +, en el tono del brillo.
+   - Ventana `brillo-<id>` (`sistema/widget_brillo.rs`, página `routes/brillo`, `brillo?id=<id>`): sin bordes, transparente, debajo de las demás y fuera de la barra de tareas.
+   - La primera vez va abajo a la derecha de la zona útil de su pantalla, a 24 px. Se arrastra y recuerda dónde quedó (`ajustes.json › widgetsBrillo`).
+   - Se enciende en la tarjeta de la pantalla ("Widget de brillo en esta pantalla") o en el submenú Brillo del ícono ("Widget de brillo: …"). Clic derecho: abrir Pantallas o quitarlo.
+   - Sigue el brillo con el aviso "brillo-cambio" del hilo de pantallas y lee la caché cada 2 s mientras se ve. Mientras se arrastra la barra, y 900 ms después, no sigue lo que llega.
+   - Si el nombre ocupa más líneas, la ventana crece: nada se corta.
 1. **Panel rápido** desde la barra de menús (Mac) o la bandeja (Windows): una ventanita sólida con baterías, salida de sonido, brillo y conectar o desconectar. Se crea al abrirla y se libera al cerrarla.
 1b. **Widgets nativos de macOS: hechos el 3 nov, sin Xcode** (`widget-mac/`, se compilan con `widget-mac/construir.sh` antes de `tauri build`).
    - Cuatro widgets: Brillo (pequeño, con botones − y +), Brillo de tus pantallas (mediano), Audífonos (pequeño) y Resumen (mediano).
@@ -336,7 +348,7 @@ El dueño los quiere **en los dos sistemas**. Hay tres niveles, que se hacen en 
 ## 13. Rendimiento y cuidado de la máquina
 
 - **Presupuestos:** menos de 5 MB de app, ~30 MB en segundo plano y menos de 100 MB con el panel abierto. Al cerrar el panel se destruye su ventana.
-- **Sondeos:** el vigía de Bluetooth cada 20 s; el brillo 4 veces por segundo solo con el panel a la vista; el sonido cada 2 s solo en el detalle.
+- **Sondeos:** el vigía de Bluetooth cada 20 s; el brillo 4 veces por segundo solo con el panel a la vista; el sonido cada 2 s solo en el detalle; cada widget de brillo lee la caché (sin tocar el monitor) cada 2 s mientras se ve. Los ajustes del monitor por DDC/CI se leen solo al abrir su sección.
 - **Sin bucles de animación y sin desenfoques** (también ahorra GPU y batería).
 - **Al desarrollar:** compilar con 6 núcleos (`.cargo/config.toml`). Revisar el diseño con `pnpm build && pnpm preview` y **un solo** Chrome sin ventana, a escala 1, que se cierra enseguida. Apagar los servidores por su PID.
 
@@ -355,8 +367,8 @@ El dueño los quiere **en los dos sistemas**. Hay tres niveles, que se hacen en 
 | 1 | Tokens de la sección 4, letra, componentes de la sección 5 y Nexo Bot con sus 8 expresiones | ✅ Hecha (3 nov): paleta turquesa, superficies sólidas, barra lateral, menú y tooltip propios, diálogo, Nexo Bot en SVG (`diseno/mascota/generar.mjs`) |
 | 2 | Barra lateral, Inicio y Dispositivos (lista + panel de detalle) | ✅ Hecha (3 nov) |
 | 3 | Detalle de audífonos y página Audio (salida y entrada del sistema, alias, olvidar) | ✅ Hecha · falta probar Olvidar con un aparato real |
-| 4 | Pantallas: resolución, frecuencia, principal y distribución | Brillo, resolución, frecuencia y principal hechos · falta la distribución arrastrable y probar con el Steren |
-| 5 | Widgets: panel rápido, WidgetKit (Mac), proveedor de widgets (Windows), `estado.json` | Widget de escritorio propio hecho (Mac y Windows) · faltan los nativos (Xcode; MSIX en Windows) |
+| 4 | Pantallas: resolución, frecuencia, principal y distribución | Brillo, resolución, frecuencia y principal hechos · brillo mínimo y ajustes del monitor por DDC/CI escritos (4 nov) · falta la distribución arrastrable y probar con el Steren |
+| 5 | Widgets: panel rápido, WidgetKit (Mac), proveedor de widgets (Windows), `estado.json` | Widget de escritorio propio hecho (Mac y Windows) · widget de brillo por pantalla escrito (4 nov), sin probar · faltan los nativos (Xcode; MSIX en Windows) |
 | 6 | Automatizaciones y Ajustes completos; versión Windows de lo anterior | Mac hecho · Windows escrito el 3 nov (Bluetooth y sonido con WASAPI y KS, monitores por DDC/CI, WMI, modos, arranque) y compilado desde la Mac con cargo-xwin · falta probarlo en el PC del trabajo |
 | 7 | Accesibilidad, optimización, pruebas y firma estable | Por empezar |
 | Más adelante | Teclado y ratón: perfiles macOS y Windows, atajos, conflictos, reasignar | **Pospuesto por decisión del dueño** |

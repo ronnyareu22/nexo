@@ -1,6 +1,7 @@
 //! Ajustes de Nexo, guardados en un JSON pequeño en la carpeta de la app.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
@@ -27,6 +28,19 @@ pub struct Ajustes {
     pub remoto: super::remoto::AjustesRemoto,
     /// Nexo Drop: recibir archivos y copiar al portapapeles las imágenes que llegan.
     pub drop: super::drop::AjustesDrop,
+    /// Brillo mínimo de cada monitor externo (id → 0–40 %): el 0 % de Nexo, para que no parpadee. Sin dato: 10 %.
+    pub minimos_brillo: BTreeMap<u32, u8>,
+    /// Widgets de brillo (uno por pantalla) y dónde quedó cada uno (ver `widget_brillo`).
+    pub widgets_brillo: Vec<WidgetBrillo>,
+}
+
+/// Un widget de brillo encendido: su pantalla y dónde lo dejó la persona (en puntos en Mac y en píxeles reales
+/// en Windows). Sin posición: abajo a la derecha de su pantalla.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetBrillo {
+    pub pantalla_id: u32,
+    pub posicion: Option<(i32, i32)>,
 }
 
 impl Default for Ajustes {
@@ -40,6 +54,8 @@ impl Default for Ajustes {
             bienvenida: false,
             remoto: super::remoto::AjustesRemoto::default(),
             drop: super::drop::AjustesDrop::default(),
+            minimos_brillo: BTreeMap::new(),
+            widgets_brillo: Vec::new(),
         }
     }
 }

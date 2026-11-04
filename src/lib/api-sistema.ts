@@ -131,7 +131,7 @@ export function moverVentana() {
 }
 
 /** Escucha un aviso de Rust o de otra ventana. Devuelve con qué dejar de escuchar. Fuera de la app no hace nada. */
-function escuchar<T>(evento: string, alLlegar: (valor: T) => void): () => void {
+export function escuchar<T>(evento: string, alLlegar: (valor: T) => void): () => void {
   if (!enApp) return () => {};
   const quitar = import('@tauri-apps/api/event')
     .then(({ listen }) => listen<T>(evento, (e) => alLlegar(e.payload)))
@@ -150,11 +150,11 @@ export const alCambiarDispositivos = (alLlegar: () => void) => escuchar<null>('w
 /** Widget: se cambió el tema en el panel. */
 export const alCambiarTema = (alLlegar: (tema: Tema) => void) => escuchar('nexo-tema', alLlegar);
 
-/** Panel: le pasa al widget el tema recién elegido. */
+/** Panel: le pasa el tema recién elegido al widget y a los widgets de brillo (a todas las ventanas). */
 export function avisarTemaAlWidget(tema: Tema) {
   if (!enApp) return;
   import('@tauri-apps/api/event')
-    .then(({ emitTo }) => emitTo('widget', 'nexo-tema', tema))
+    .then(({ emit }) => emit('nexo-tema', tema))
     .catch(() => {});
 }
 
