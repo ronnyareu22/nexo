@@ -27,7 +27,7 @@ pub mod widget;
 pub mod widget_brillo;
 pub mod widgets_mac;
 
-use crate::dispositivos::pantallas::Pantallas;
+use crate::dispositivos::pantallas::{Pantallas, TeclasPantalla};
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -38,10 +38,34 @@ pub struct EstadoAjustes {
     pub teclas_brillo: bool,
     /// Si macOS ya le dio a Nexo el permiso de Accesibilidad.
     pub permiso: bool,
+    /// Windows: los atajos de brillo (de fábrica Ctrl+Alt+F1 y F2).
+    pub atajo_bajar: teclas::Atajo,
+    pub atajo_subir: teclas::Atajo,
+    /// Windows: las teclas de brillo del portátil pasan al monitor bajo el mouse.
+    pub teclas_portatil: bool,
+    /// Windows: hay pantalla de portátil encendida (si no, ese ajuste no se muestra).
+    pub hay_portatil: bool,
 }
 
 fn estado(app: &AppHandle) -> EstadoAjustes {
-    EstadoAjustes { teclas_brillo: ajustes::cargar(app).teclas_brillo, permiso: teclas::permiso_concedido() }
+    let a = ajustes::cargar(app);
+    EstadoAjustes {
+        teclas_brillo: a.teclas_brillo,
+        permiso: teclas::permiso_concedido(),
+        atajo_bajar: a.atajo_bajar.valido_o(teclas::Atajo::BAJAR),
+        atajo_subir: a.atajo_subir.valido_o(teclas::Atajo::SUBIR),
+        teclas_portatil: a.teclas_portatil,
+        hay_portatil: hay_portatil(),
+    }
+}
+
+#[cfg(windows)]
+fn hay_portatil() -> bool {
+    crate::dispositivos::pantallas::hay_integrada()
+}
+#[cfg(not(windows))]
+fn hay_portatil() -> bool {
+    false
 }
 
 #[tauri::command]
@@ -49,7 +73,7 @@ pub fn leer_ajustes(app: AppHandle) -> EstadoAjustes {
     estado(&app)
 }
 
-/// Enciende o apaga "teclas de brillo en el monitor bajo el mouse" (en Windows, Ctrl+Alt+F1 / F2).
+/// Enciende o apaga "teclas de brillo en el monitor bajo el mouse" (en Windows, los atajos y las teclas del portátil).
 /// Si falta el permiso, abre el aviso de macOS y lo activa solo en cuanto se conceda (espera hasta 3 min).
 #[tauri::command]
 pub fn usar_teclas_brillo(app: AppHandle, pantallas: State<'_, Arc<Pantallas>>, activar: bool) -> Result<EstadoAjustes, String> {
@@ -74,6 +98,59 @@ pub fn usar_teclas_brillo(app: AppHandle, pantallas: State<'_, Arc<Pantallas>>, 
     #[cfg(windows)]
     bandeja::actualizar(&app);
     Ok(estado(&app))
+}
+
+/// Windows: cambia el atajo de bajar (`subir` = false) o de subir el brillo. Lo revisa, lo guarda y lo aplica.
+#[tauri::command]
+pub fn poner_atajo_brillo(app: AppHandle, subir: bool, atajo: teclas::Atajo) -> Result<EstadoAjustes, String> {
+    atajo.validar()?;
+    let a = ajustes::cargar(&app);
+    let otro = if subir { a.atajo_bajar.valido_o(teclas::Atajo::BAJAR) } else { a.atajo_subir.valido_o(teclas::Atajo::SUBIR) };
+    if otro == atajo {
+        return Err(format!("Esa combinación ya es la de {} brillo.", if subir { "bajar" } else { "subir" }));
+    }
+    let a = ajustes::cambiar(&app, |a| {
+        if subir {
+            a.atajo_subir = atajo;
+        } else {
+            a.atajo_bajar = atajo;
+        }
+    })?;
+    teclas::configurar(a.atajo_bajar, a.atajo_subir, a.teclas_portatil);
+    #[cfg(windows)]
+    bandeja::actualizar(&app);
+    Ok(estado(&app))
+}
+
+/// Windows: enciende o apaga "usar las teclas de brillo del portátil" (pasan al monitor bajo el mouse).
+#[tauri::command]
+pub fn usar_teclas_portatil(app: AppHandle, activar: bool) -> Result<EstadoAjustes, String> {
+    let a = ajustes::cambiar(&app, |a| a.teclas_portatil = activar)?;
+    teclas::configurar(a.atajo_bajar, a.atajo_subir, a.teclas_portatil);
+    Ok(estado(&app))
+}
+
+/// Cómo responde una pantalla a las teclas de brillo: `{ responde, paso }`.
+#[tauri::command]
+pub fn teclas_pantalla(pantallas: State<'_, Arc<Pantallas>>, id: u32) -> TeclasPantalla {
+    pantallas.teclas_de(id)
+}
+
+/// Cambia si una pantalla responde a las teclas de brillo y de cuánto es su paso (3, 6 o 10 %). Lo guarda.
+#[tauri::command]
+pub fn poner_teclas_pantalla(
+    app: AppHandle,
+    pantallas: State<'_, Arc<Pantallas>>,
+    id: u32,
+    responde: bool,
+    paso: u8,
+) -> Result<TeclasPantalla, String> {
+    pantallas.poner_teclas(id, TeclasPantalla { responde, paso });
+    let t = pantallas.teclas_de(id);
+    ajustes::cambiar(&app, |a| {
+        a.teclas_pantallas.insert(id, t);
+    })?;
+    Ok(t)
 }
 
 /// El nivel que debe mostrar el aviso al abrirse.

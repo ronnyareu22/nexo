@@ -1,12 +1,15 @@
 <!-- Atajo de las teclas de brillo: con el mouse sobre un monitor externo, las teclas de brillo de la Mac cambian ese
      monitor. Pide el permiso de Accesibilidad: si falta, lo dice y ofrece abrirlo, y revisa cada 3 s hasta que esté.
-     En Windows son Ctrl + Alt + F1 / F2 sobre cualquier pantalla (sin permiso que pedir); se muestran como teclas.
+     En Windows son dos atajos sobre cualquier pantalla (sin permiso que pedir; de fábrica Ctrl + Alt + F1 / F2), que
+     se muestran como teclas y se cambian con «Cambiar»: la siguiente combinación que se presione (Esc cancela).
+     Si la PC es un portátil, también el ajuste de sus propias teclas de brillo (pasan al monitor bajo el mouse).
      `dentro` lo dibuja como filas sueltas, para ponerlo dentro de otro panel (Automatizaciones). -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { leerAjustes, usarTeclasBrillo } from '$lib/api';
+  import { leerAjustes, ponerAtajoBrillo, usarTeclasBrillo, usarTeclasPortatil } from '$lib/api';
   import { abrirAjustesPrivacidad, esMac } from '$lib/api-sistema';
-  import type { EstadoAjustes } from '$lib/tipos';
+  import { atajoDe, mismoAtajo, problemaAtajo, teclasDe, textoAtajo } from '$lib/atajos';
+  import type { Atajo, EstadoAjustes } from '$lib/tipos';
   import Interruptor from './Interruptor.svelte';
   import Icono from './Icono.svelte';
 
@@ -19,11 +22,99 @@
   const titulo = esMac
     ? 'Teclas de brillo en el monitor bajo el mouse'
     : 'Brillo con el teclado en el monitor bajo el mouse';
-  /** Las combinaciones de Windows, para dibujarlas como teclas. */
-  const combos = [
-    { teclas: ['Ctrl', 'Alt', 'F1'], accion: 'Bajar' },
-    { teclas: ['Ctrl', 'Alt', 'F2'], accion: 'Subir' },
-  ];
+  /** Windows: los dos atajos, para dibujarlos como teclas. */
+  const atajos = $derived(
+    ajustes
+      ? [
+          { subir: false, nombre: 'Bajar brillo', atajo: ajustes.atajoBajar },
+          { subir: true, nombre: 'Subir brillo', atajo: ajustes.atajoSubir },
+        ]
+      : [],
+  );
+
+  // --- Cambiar un atajo: se espera la siguiente combinación (Esc cancela). ---
+  /** Cuál se está grabando: false bajar, true subir. */
+  let grabando = $state<boolean | null>(null);
+  let guardandoAtajo = $state(false);
+  /** Lo que se dice mientras se graba o al terminar (también para el lector de pantalla). */
+  let avisoAtajo = $state('');
+  let avisoError = $state(false);
+  let botonCancelar = $state<HTMLButtonElement | null>(null);
+  let cambiandoPortatil = $state(false);
+
+  function empezarGrabar(subir: boolean) {
+    grabando = subir;
+    avisoAtajo = '';
+    avisoError = false;
+  }
+
+  function cancelarGrabar() {
+    grabando = null;
+    avisoAtajo = '';
+    avisoError = false;
+  }
+
+  function avisar(texto: string, error = false) {
+    avisoAtajo = texto;
+    avisoError = error;
+  }
+
+  async function guardarAtajo(subir: boolean, atajo: Atajo) {
+    grabando = null;
+    guardandoAtajo = true;
+    try {
+      ajustes = await ponerAtajoBrillo(subir, atajo);
+      avisar(`Listo: ${textoAtajo(atajo)} ${subir ? 'sube' : 'baja'} el brillo.`);
+    } catch (e) {
+      avisar(String(e), true);
+    }
+    guardandoAtajo = false;
+  }
+
+  function alTeclear(e: KeyboardEvent) {
+    const subir = grabando;
+    if (subir === null || !ajustes) return;
+    // Mientras se graba, ninguna tecla hace lo suyo (Tab, Enter, atajos de la ventana…).
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.repeat) return;
+    if (e.key === 'Escape' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+      cancelarGrabar();
+      return;
+    }
+    const atajo = atajoDe(e);
+    if (!atajo) return; // solo un modificador: se espera la tecla que sigue
+    const problema = problemaAtajo(atajo);
+    if (problema) {
+      avisar(problema, true);
+      return;
+    }
+    const otro = subir ? ajustes.atajoBajar : ajustes.atajoSubir;
+    if (mismoAtajo(atajo, otro)) {
+      avisar(`${textoAtajo(atajo)} ya es el atajo para ${subir ? 'bajar' : 'subir'} el brillo.`, true);
+      return;
+    }
+    guardarAtajo(subir, atajo);
+  }
+
+  // Solo mientras se graba: se escucha antes que nadie (fase de captura) y se suelta al terminar.
+  $effect(() => {
+    if (grabando === null) return;
+    botonCancelar?.focus();
+    window.addEventListener('keydown', alTeclear, true);
+    return () => window.removeEventListener('keydown', alTeclear, true);
+  });
+
+  async function alternarPortatil() {
+    if (!ajustes) return;
+    cambiandoPortatil = true;
+    try {
+      ajustes = await usarTeclasPortatil(!ajustes.teclasPortatil);
+    } catch (e) {
+      onerror(String(e));
+    }
+    cambiandoPortatil = false;
+  }
 
   async function alternar() {
     if (!ajustes) return;
@@ -67,22 +158,68 @@
         </div>
       {:else}
         <div class="ayuda">
-          Pon el mouse sobre una pantalla y usa Ctrl + Alt + F1 para bajar y Ctrl + Alt + F2 para subir el brillo.
-          Puedes asignar esas combinaciones a teclas de tu Wave Keys o botones del MX Master 4 en Logi Options+.
-        </div>
-        <!-- Lo mismo que dice la ayuda, en teclas: el lector de pantalla ya lo leyó arriba. -->
-        <div class="combos" class:apagado={!a.teclasBrillo} aria-hidden="true">
-          {#each combos as c (c.accion)}
-            <span class="combo">
-              <span class="teclas">{#each c.teclas as t (t)}<kbd>{t}</kbd>{/each}</span>
-              <span>{c.accion}</span>
-            </span>
-          {/each}
+          Pon el mouse sobre una pantalla y usa estos atajos para bajar o subir su brillo. Puedes asignarlos a teclas
+          de tu Wave Keys o botones del MX Master 4 en Logi Options+.
         </div>
       {/if}
     </div>
     <Interruptor encendido={a.teclasBrillo} cargando={cambiando} etiqueta={titulo} oncambio={alternar} />
   </div>
+
+  {#if !esMac}
+    <div class="atajos" class:apagado={!a.teclasBrillo}>
+      {#each atajos as f (f.subir)}
+        <div class="atajo" class:grabando={grabando === f.subir}>
+          <span class="atajo__nombre">{f.nombre}</span>
+          {#if grabando === f.subir}
+            <span class="atajo__espera">Presiona la combinación…</span>
+            <button class="boton-vidrio boton" type="button" bind:this={botonCancelar} onclick={cancelarGrabar}>
+              Cancelar
+            </button>
+          {:else}
+            <span class="teclas" role="img" aria-label={textoAtajo(f.atajo)}>
+              {#each teclasDe(f.atajo) as t (t)}<kbd aria-hidden="true">{t}</kbd>{/each}
+            </span>
+            <button
+              class="boton-vidrio boton"
+              type="button"
+              disabled={guardandoAtajo}
+              aria-label="Cambiar el atajo para {f.nombre.toLowerCase()}"
+              onclick={() => empezarGrabar(f.subir)}
+            >
+              Cambiar
+            </button>
+          {/if}
+        </div>
+      {/each}
+      <p class="atajos__aviso" class:error={avisoError} role="status" aria-live="polite">
+        {#if grabando !== null && !avisoAtajo}
+          Usa Ctrl, Alt o Win con otra tecla, o una tecla F sola. Esc cancela.
+        {:else}
+          {avisoAtajo}
+        {/if}
+      </p>
+    </div>
+
+    {#if a.hayPortatil}
+      <div class="fila">
+        <span class="ficha" class:activa={a.teclasBrillo && a.teclasPortatil}><Icono nombre="sol" tamano={18} /></span>
+        <div class="textos">
+          <div class="titulo">Usar las teclas de brillo del portátil</div>
+          <div class="ayuda">
+            También funcionan las teclas de brillo de tu portátil cuando el mouse está sobre el otro monitor. Windows
+            muestra su propio aviso igual.
+          </div>
+        </div>
+        <Interruptor
+          encendido={a.teclasPortatil}
+          cargando={cambiandoPortatil}
+          etiqueta="Usar las teclas de brillo del portátil"
+          oncambio={alternarPortatil}
+        />
+      </div>
+    {/if}
+  {/if}
 
   {#if faltaPermiso}
     <div class="permiso" class:aviso={a.teclasBrillo}>
@@ -162,23 +299,48 @@
     color: var(--texto-2);
   }
 
-  /* ---------- Teclas (Windows) ---------- */
-  .combos {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 18px;
-    margin-top: 10px;
+  /* ---------- Atajos (Windows) ---------- */
+  .atajos {
+    padding: 0 0 10px 50px;
     transition: opacity var(--dur-color) ease;
   }
-  .combos.apagado {
+  .atajos.apagado {
     opacity: 0.55;
   }
-  .combo {
-    display: inline-flex;
+  .atajo {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 8px 12px;
+    min-height: 40px;
+    padding: 4px 0;
+  }
+  .atajo__nombre {
+    flex: 0 0 104px;
     font-size: 12.5px;
     color: var(--texto-2);
+  }
+  .atajo__espera {
+    flex: 1;
+    min-width: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--amarillo-texto);
+  }
+  .atajo .teclas {
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .atajos__aviso {
+    min-height: 18px;
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--texto-2);
+  }
+  .atajos__aviso.error {
+    color: var(--aviso);
   }
   .teclas {
     display: inline-flex;

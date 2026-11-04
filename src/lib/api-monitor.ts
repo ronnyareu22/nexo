@@ -3,7 +3,7 @@
 // Fuera de la app (por ejemplo `pnpm preview` en el navegador) usa datos de ejemplo: el Steren 27" del dueño.
 import { invoke } from '@tauri-apps/api/core';
 import { escuchar } from './api-sistema';
-import type { AjustesMonitor, CambioBrillo, ValorVcp } from './tipos-sistema';
+import type { AjustesMonitor, CambioBrillo, TeclasPantalla, ValorVcp } from './tipos-sistema';
 
 const enApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -18,6 +18,14 @@ export const ponerVcp = (id: number, codigo: number, valor: number): Promise<Val
 /** Cambia el brillo mínimo (0–40 %) de un monitor externo. Devuelve el brillo en la escala de Nexo. */
 export const ponerMinimoBrillo = (id: number, valor: number): Promise<number> =>
   enApp ? invoke<number>('poner_minimo_brillo', { id, valor }) : minimoEjemplo(id, valor);
+
+/** Cómo responde una pantalla a las teclas de brillo (si responde y de cuánto es el paso). */
+export const teclasPantalla = (id: number): Promise<TeclasPantalla> =>
+  enApp ? invoke<TeclasPantalla>('teclas_pantalla', { id }) : Promise.resolve({ ...teclasEjemplo(id) });
+
+/** Cambia si una pantalla responde a las teclas de brillo y su paso (3, 6 o 10 %). Devuelve cómo quedó. */
+export const ponerTeclasPantalla = (id: number, t: TeclasPantalla): Promise<TeclasPantalla> =>
+  enApp ? invoke<TeclasPantalla>('poner_teclas_pantalla', { id, ...t }) : ponerTeclasEjemplo(id, t);
 
 /** Las pantallas que tienen su widget de brillo encendido. */
 export const leerWidgetsBrillo = (): Promise<number[]> =>
@@ -100,6 +108,13 @@ async function ponerVcpEjemplo(id: number, codigo: number, valor: number): Promi
   if (!v) throw 'Este monitor no tiene ese ajuste.';
   v.actual = Math.min(valor, v.maximo);
   return { ...v };
+}
+
+const teclasGuardadas: Record<number, TeclasPantalla> = {};
+const teclasEjemplo = (id: number): TeclasPantalla => teclasGuardadas[id] ?? { responde: true, paso: 6 };
+function ponerTeclasEjemplo(id: number, t: TeclasPantalla): Promise<TeclasPantalla> {
+  teclasGuardadas[id] = { responde: t.responde, paso: [3, 6, 10].includes(t.paso) ? t.paso : 6 };
+  return Promise.resolve({ ...teclasGuardadas[id] });
 }
 
 function minimoEjemplo(id: number, valor: number): Promise<number> {

@@ -102,9 +102,22 @@ pub fn a_porcentaje(crudo: u32, minimo: u8, maximo: u32) -> u8 {
     ((crudo.saturating_sub(p) as f64 / (maximo - p) as f64) * 100.0).round().clamp(0.0, 100.0) as u8
 }
 
-/// Un toque de tecla sube o baja 1/16 de la escala de Nexo (como las teclas de la Mac).
-pub fn paso(porcentaje: u8, pasos: i32) -> u8 {
-    (porcentaje as f64 + pasos as f64 * 100.0 / 16.0).round().clamp(0.0, 100.0) as u8
+/// Tamaños de paso que se pueden elegir por pantalla: fino, normal (1/16, como la Mac) y grande.
+pub const PASOS: [u8; 3] = [3, 6, 10];
+pub const PASO_NORMAL: u8 = 6;
+
+/// Un paso que no es de la lista vale como normal.
+pub fn paso_valido(tamano: u8) -> u8 {
+    if PASOS.contains(&tamano) { tamano } else { PASO_NORMAL }
+}
+
+/// Un toque de tecla sube o baja `tamano` % de la escala de Nexo. El normal (6) es 1/16, como las teclas de la Mac.
+pub fn paso(porcentaje: u8, pasos: i32, tamano: u8) -> u8 {
+    let t = match paso_valido(tamano) {
+        PASO_NORMAL => 100.0 / 16.0,
+        otro => otro as f64,
+    };
+    (porcentaje as f64 + pasos as f64 * t).round().clamp(0.0, 100.0) as u8
 }
 
 // ---------------------------------------------------------------- Capacidades
@@ -314,9 +327,13 @@ mod pruebas {
         assert_eq!(a_porcentaje(3, 10, 100), 0);
         // Tope del 40 %.
         assert_eq!(piso(90, 100), 40);
-        assert_eq!(paso(0, 1), 6);
-        assert_eq!(paso(100, -1), 94);
-        assert_eq!(paso(3, -1), 0);
+        assert_eq!(paso(0, 1, 6), 6);
+        assert_eq!(paso(100, -1, 6), 94);
+        assert_eq!(paso(3, -1, 6), 0);
+        assert_eq!(paso(50, 2, 6), 63);
+        assert_eq!(paso(50, -1, 3), 47);
+        assert_eq!(paso(50, 1, 10), 60);
+        assert_eq!(paso(50, 1, 7), 56); // fuera de la lista: normal
     }
 
     #[test]

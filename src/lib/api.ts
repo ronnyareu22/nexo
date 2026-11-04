@@ -2,6 +2,7 @@
 // Fuera de la app (por ejemplo `pnpm preview` en el navegador) usa datos de ejemplo para ver el diseño.
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  Atajo,
   Automatico,
   CambioSonido,
   DispositivoAudio,
@@ -71,10 +72,39 @@ export const ponerBrillo = (id: number, valor: number): Promise<number> =>
   enApp ? invoke<number>('poner_brillo', { id, valor }) : Promise.resolve(valor);
 
 export const leerAjustes = (): Promise<EstadoAjustes> =>
-  enApp ? invoke<EstadoAjustes>('leer_ajustes') : Promise.resolve({ teclasBrillo: true, permiso: true });
+  enApp ? invoke<EstadoAjustes>('leer_ajustes') : Promise.resolve(copiaAjustesEjemplo());
 
 export const usarTeclasBrillo = (activar: boolean): Promise<EstadoAjustes> =>
-  enApp ? invoke<EstadoAjustes>('usar_teclas_brillo', { activar }) : Promise.resolve({ teclasBrillo: activar, permiso: true });
+  enApp ? invoke<EstadoAjustes>('usar_teclas_brillo', { activar }) : cambiarAjustesEjemplo({ teclasBrillo: activar });
+
+/** Windows: cambia el atajo de bajar o de subir el brillo. Rechaza los que usa Windows. */
+export const ponerAtajoBrillo = (subir: boolean, atajo: Atajo): Promise<EstadoAjustes> =>
+  enApp
+    ? invoke<EstadoAjustes>('poner_atajo_brillo', { subir, atajo })
+    : cambiarAjustesEjemplo(subir ? { atajoSubir: atajo } : { atajoBajar: atajo });
+
+/** Windows: enciende o apaga "usar las teclas de brillo del portátil". */
+export const usarTeclasPortatil = (activar: boolean): Promise<EstadoAjustes> =>
+  enApp ? invoke<EstadoAjustes>('usar_teclas_portatil', { activar }) : cambiarAjustesEjemplo({ teclasPortatil: activar });
+
+// Ajustes de ejemplo (fuera de la app): los atajos de fábrica y un portátil con monitor externo.
+const ajustesEjemplo: EstadoAjustes = {
+  teclasBrillo: true,
+  permiso: true,
+  atajoBajar: { vk: 0x70, ctrl: true, alt: true, shift: false, win: false },
+  atajoSubir: { vk: 0x71, ctrl: true, alt: true, shift: false, win: false },
+  teclasPortatil: true,
+  hayPortatil: true,
+};
+const copiaAjustesEjemplo = (): EstadoAjustes => ({
+  ...ajustesEjemplo,
+  atajoBajar: { ...ajustesEjemplo.atajoBajar },
+  atajoSubir: { ...ajustesEjemplo.atajoSubir },
+});
+function cambiarAjustesEjemplo(cambio: Partial<EstadoAjustes>): Promise<EstadoAjustes> {
+  Object.assign(ajustesEjemplo, cambio);
+  return Promise.resolve(copiaAjustesEjemplo());
+}
 
 export const leerBrillos = (): Promise<[number, number][]> =>
   enApp ? invoke<[number, number][]>('brillos') : Promise.resolve(pantallasEjemplo.map((p) => [p.id, p.brillo ?? 0]));

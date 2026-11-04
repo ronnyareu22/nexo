@@ -137,10 +137,26 @@ export interface Pantalla {
   controlable: boolean;
 }
 
+/** Un atajo de Windows: la tecla (código virtual, VK) y sus modificadores. */
+export interface Atajo {
+  vk: number;
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  win: boolean;
+}
+
 export interface EstadoAjustes {
   teclasBrillo: boolean;
   /** Si macOS ya le dio a Nexo el permiso de Accesibilidad. */
   permiso: boolean;
+  /** Windows: atajos de brillo (de fábrica Ctrl+Alt+F1 y Ctrl+Alt+F2). */
+  atajoBajar: Atajo;
+  atajoSubir: Atajo;
+  /** Windows: las teclas de brillo del portátil pasan al monitor bajo el mouse. */
+  teclasPortatil: boolean;
+  /** Windows: hay pantalla de portátil encendida (si no, ese ajuste no se muestra). */
+  hayPortatil: boolean;
 }
 
 /** Historial de uso de un aparato (lo lleva Nexo). Momentos en segundos Unix. */

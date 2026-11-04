@@ -1,10 +1,19 @@
 <!-- "Ajustes del monitor" de un monitor externo, dentro de su tarjeta (Pantallas). Se despliega con un botón, sin
-     pestañas. Arriba, siempre, el brillo mínimo (el 0 % de Nexo, para que el monitor no parpadee). Debajo, una
-     rejilla con lo que el monitor dice que tiene por DDC/CI, cada control con su valor actual.
+     pestañas. Arriba, siempre, el brillo mínimo (el 0 % de Nexo, para que el monitor no parpadee) y cómo responde
+     a las teclas de brillo (si responde y de cuánto es el paso). Debajo, una rejilla con lo que el monitor dice que
+     tiene por DDC/CI, cada control con su valor actual.
      Los valores se leen al abrir la sección (nunca en un bucle) y cada control manda siempre el último valor.
      Cambiar la entrada y restaurar los valores de fábrica piden confirmación. -->
 <script lang="ts">
-  import { ajustesMonitor, ponerMinimoBrillo, ponerVcp, pruebaMonitorAbierto } from '$lib/api-monitor';
+  import {
+    ajustesMonitor,
+    ponerMinimoBrillo,
+    ponerTeclasPantalla,
+    ponerVcp,
+    pruebaMonitorAbierto,
+    teclasPantalla,
+  } from '$lib/api-monitor';
+  import { esMac } from '$lib/api-sistema';
   import { enviadorDelUltimo } from '$lib/enviador';
   import {
     CON_SONIDO,
@@ -19,7 +28,7 @@
     textoContinuo,
   } from '$lib/monitor';
   import type { Pantalla } from '$lib/tipos';
-  import type { AjustesMonitor, CapacidadMonitor } from '$lib/tipos-sistema';
+  import type { AjustesMonitor, CapacidadMonitor, TeclasPantalla } from '$lib/tipos-sistema';
   import Deslizador from './Deslizador.svelte';
   import Dialogo from './Dialogo.svelte';
   import Icono from './Icono.svelte';
@@ -57,11 +66,41 @@
     if (esta === lectura) cargando = false;
   }
 
+  // --- Teclas de brillo: si este monitor responde y de cuánto es el paso (guardado en Nexo, no en el monitor). ---
+  let teclas = $state<TeclasPantalla>({ responde: true, paso: 6 });
+  const pasos = [
+    { valor: '3', nombre: 'Fino', detalle: '3 % por toque' },
+    { valor: '6', nombre: 'Normal', detalle: '6 % por toque' },
+    { valor: '10', nombre: 'Grande', detalle: '10 % por toque' },
+  ];
+  const otraPantalla = esMac ? 'la pantalla de la Mac' : 'la pantalla del portátil';
+  function leerTeclas() {
+    teclasPantalla(p.id)
+      .then((t) => (teclas = t))
+      .catch(() => {});
+  }
+  async function cambiarTeclas(cambio: Partial<TeclasPantalla>) {
+    const antes = teclas;
+    teclas = { ...teclas, ...cambio };
+    try {
+      teclas = await ponerTeclasPantalla(p.id, teclas);
+    } catch (e) {
+      teclas = antes;
+      onerror(String(e));
+    }
+  }
+
   function alternar() {
     abierto = !abierto;
-    if (abierto) leer();
+    if (abierto) {
+      leer();
+      leerTeclas();
+    }
   }
-  if (pruebaMonitorAbierto) leer();
+  if (pruebaMonitorAbierto) {
+    leer();
+    leerTeclas();
+  }
 
   // --- Escribir: siempre el último valor de cada código, sin fila de órdenes. ---
   const enviadores = new Map<number, (v: number) => void>();
@@ -188,7 +227,7 @@
     <span class="cabeza__icono" aria-hidden="true"><Icono nombre="ajustes" tamano={18} /></span>
     <span class="textos">
       <span class="titulo">Ajustes del monitor</span>
-      <span class="ayuda">Brillo mínimo y lo que tu monitor deja cambiar por DDC/CI.</span>
+      <span class="ayuda">Brillo mínimo, teclas de brillo y lo que tu monitor deja cambiar por DDC/CI.</span>
     </span>
     <span class="cabeza__chevron" aria-hidden="true">
       <Icono nombre={abierto ? 'chevron-arriba' : 'chevron-abajo'} tamano={18} />
@@ -214,6 +253,34 @@
             Tu 0 % de brillo usa este nivel del monitor. Si el monitor parpadea con poco brillo, súbelo hasta que deje
             de hacerlo.
           </p>
+        </div>
+
+        <div class="celda">
+          <div class="celda__cabeza centrada">
+            <span class="nombre">Responde a las teclas de brillo</span>
+            <Interruptor
+              encendido={teclas.responde}
+              etiqueta="{p.nombre} responde a las teclas de brillo"
+              oncambio={() => cambiarTeclas({ responde: !teclas.responde })}
+            />
+          </div>
+          <span class="nota-celda">
+            {teclas.responde
+              ? 'Con el mouse aquí, las teclas de brillo cambian este monitor.'
+              : `Las teclas cambian ${otraPantalla} aunque el mouse esté aquí.`}
+          </span>
+        </div>
+
+        <div class="celda">
+          <div class="celda__cabeza">
+            <span class="nombre">Paso de las teclas</span>
+          </div>
+          <MenuDesplegable
+            opciones={pasos}
+            valor={String(teclas.paso)}
+            etiqueta="Paso de las teclas de brillo en {p.nombre}"
+            oncambio={(v) => cambiarTeclas({ paso: Number(v) })}
+          />
         </div>
 
         {#if cargando && !datos}

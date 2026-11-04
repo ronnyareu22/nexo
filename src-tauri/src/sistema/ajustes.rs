@@ -1,5 +1,7 @@
 //! Ajustes de Nexo, guardados en un JSON pequeño en la carpeta de la app.
 
+use super::teclas::Atajo;
+use crate::dispositivos::pantallas::TeclasPantalla;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -9,11 +11,19 @@ use tauri::{AppHandle, Manager};
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Ajustes {
-    /// Las teclas de brillo de la Mac (o Ctrl+Alt+F1 / F2 en Windows) cambian la pantalla que está bajo el mouse.
+    /// Las teclas de brillo de la Mac (o los atajos de Windows) cambian la pantalla que está bajo el mouse.
     /// En Windows viene encendido; en la Mac pide permiso de Accesibilidad, así que ahí viene apagado.
     pub teclas_brillo: bool,
     /// Windows: ya se encendieron las teclas de brillo la primera vez (ver `primer_inicio`). Después manda la persona.
     pub teclas_brillo_revisadas: bool,
+    /// Windows: atajo para bajar el brillo de la pantalla bajo el mouse. De fábrica, Ctrl+Alt+F1.
+    pub atajo_bajar: Atajo,
+    /// Windows: atajo para subirlo. De fábrica, Ctrl+Alt+F2.
+    pub atajo_subir: Atajo,
+    /// Windows: las teclas de brillo del portátil cambian el monitor externo que está bajo el mouse.
+    pub teclas_portatil: bool,
+    /// Cómo responde cada pantalla a las teclas de brillo (id → si responde y su paso). Sin dato: responde, 6 %.
+    pub teclas_pantallas: BTreeMap<u32, TeclasPantalla>,
     /// El widget de escritorio propio (ver `widget`). Viene encendido en Windows; en la Mac están los widgets
     /// nativos (widget-mac/), así que ahí viene apagado.
     pub widget: bool,
@@ -48,6 +58,10 @@ impl Default for Ajustes {
         Ajustes {
             teclas_brillo: cfg!(windows),
             teclas_brillo_revisadas: false,
+            atajo_bajar: Atajo::BAJAR,
+            atajo_subir: Atajo::SUBIR,
+            teclas_portatil: true,
+            teclas_pantallas: BTreeMap::new(),
             widget: !cfg!(target_os = "macos"),
             widget_posicion: None,
             nombre: None,

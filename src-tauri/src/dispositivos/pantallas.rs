@@ -13,7 +13,7 @@
 #[path = "vcp.rs"]
 pub mod vcp;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, mpsc};
 
@@ -29,6 +29,22 @@ pub struct Pantalla {
     pub controlable: bool,
     /// La pantalla principal: la que tiene la barra de menús.
     pub principal: bool,
+}
+
+/// Cómo responde una pantalla a las teclas de brillo (se guarda por pantalla en los ajustes).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TeclasPantalla {
+    /// Con el mouse encima, las teclas cambian esta pantalla. Si no, van a la del portátil (o la Mac).
+    pub responde: bool,
+    /// Cuánto cambia cada toque, en %: 3 (fino), 6 (normal, 1/16) o 10 (grande).
+    pub paso: u8,
+}
+
+impl Default for TeclasPantalla {
+    fn default() -> Self {
+        TeclasPantalla { responde: true, paso: vcp::PASO_NORMAL }
+    }
 }
 
 /// Un modo de pantalla (resolución y frecuencia) que se puede elegir.
@@ -59,9 +75,9 @@ type Respuesta<T> = mpsc::Sender<Result<T, String>>;
 enum Orden {
     Listar(mpsc::Sender<Vec<Pantalla>>),
     PonerBrillo(u32, u8, Respuesta<u8>),
-    /// Un toque de tecla: +1 sube, −1 baja (en pasos de 1/16).
+    /// Toques de tecla: +1 sube, −1 baja, con el tamaño de paso de esa pantalla (%).
     #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))] // lo usa el atajo de teclas (Mac y Windows)
-    Paso(u32, i32),
+    Paso(u32, i32, u8),
     Refrescar,
     /// Lee los ajustes del monitor (capacidades una vez; los valores, cada vez).
     Ajustes(u32, Respuesta<vcp::AjustesMonitor>),
@@ -88,8 +104,9 @@ struct Lote {
     minimos: HashMap<u32, (u8, Vec<Respuesta<u8>>)>,
     brillos: HashMap<u32, (u8, Vec<Respuesta<u8>>)>,
     vcp: HashMap<(u32, u8), (u16, Vec<Respuesta<vcp::Valor>>)>,
+    /// Toques sumados de cada pantalla y su tamaño de paso.
     #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
-    pasos: HashMap<u32, i32>,
+    pasos: HashMap<u32, (i32, u8)>,
     otras: Vec<Orden>,
 }
 
@@ -104,7 +121,11 @@ impl Lote {
         };
         for orden in std::iter::once(primera).chain(rx.try_iter()) {
             match orden {
-                Orden::Paso(id, n) => *l.pasos.entry(id).or_default() += n,
+                Orden::Paso(id, n, tamano) => {
+                    let e = l.pasos.entry(id).or_insert((0, tamano));
+                    e.0 += n;
+                    e.1 = tamano;
+                }
                 Orden::PonerBrillo(id, valor, t) => ultimo(&mut l.brillos, id, valor, t),
                 Orden::Minimo(id, valor, t) => ultimo(&mut l.minimos, id, valor, t),
                 Orden::PonerVcp(id, codigo, valor, t) => ultimo(&mut l.vcp, (id, codigo), valor, t),
@@ -142,11 +163,14 @@ pub struct Pantallas {
     /// Último brillo conocido de cada monitor externo (para leerlo al instante).
     /// En Windows también el de la pantalla del portátil (WMI tampoco se lee al instante).
     brillos_externos: Arc<Mutex<HashMap<u32, u8>>>,
+    /// Cómo responde cada pantalla a las teclas (sin dato: responde, paso normal).
+    teclas: Mutex<HashMap<u32, TeclasPantalla>>,
 }
 
 impl Pantallas {
     /// `minimos`: el brillo mínimo guardado de cada monitor externo (los que no están usan el 10 %).
-    pub fn iniciar(avisos: Avisos, minimos: HashMap<u32, u8>) -> Self {
+    /// `teclas`: cómo responde cada pantalla a las teclas de brillo.
+    pub fn iniciar(avisos: Avisos, minimos: HashMap<u32, u8>, teclas: HashMap<u32, TeclasPantalla>) -> Self {
         let (tx, rx) = mpsc::channel();
         let controlables = Arc::new(Mutex::new(HashSet::new()));
         let brillos_externos = Arc::new(Mutex::new(HashMap::new()));
@@ -158,7 +182,7 @@ impl Pantallas {
         if let Err(e) = hilo {
             eprintln!("Nexo: no se pudo iniciar el hilo de pantallas ({e})");
         }
-        let p = Self { tx: Mutex::new(tx), controlables, brillos_externos };
+        let p = Self { tx: Mutex::new(tx), controlables, brillos_externos, teclas: Mutex::new(teclas) };
         p.enviar(Orden::Refrescar);
         p
     }
@@ -187,10 +211,24 @@ impl Pantallas {
         self.pedir(|t| Orden::PonerBrillo(id, valor.min(100), t))
     }
 
-    /// Lo usa el atajo de teclas: no espera respuesta.
+    /// Lo usa el atajo de teclas: no espera respuesta. Cada toque mueve el paso elegido para esa pantalla.
     #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
     pub fn paso(&self, id: u32, pasos: i32) {
-        self.enviar(Orden::Paso(id, pasos));
+        let tamano = self.teclas_de(id).paso;
+        self.enviar(Orden::Paso(id, pasos, tamano));
+    }
+
+    /// Cómo responde una pantalla a las teclas de brillo.
+    pub fn teclas_de(&self, id: u32) -> TeclasPantalla {
+        let t = self.teclas.lock().ok().and_then(|m| m.get(&id).copied()).unwrap_or_default();
+        TeclasPantalla { paso: vcp::paso_valido(t.paso), ..t }
+    }
+
+    /// Cambia cómo responde una pantalla a las teclas (quien llama lo guarda en los ajustes).
+    pub fn poner_teclas(&self, id: u32, t: TeclasPantalla) {
+        if let Ok(mut m) = self.teclas.lock() {
+            m.insert(id, TeclasPantalla { paso: vcp::paso_valido(t.paso), ..t });
+        }
     }
 
     #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
@@ -240,8 +278,8 @@ trait Sistema {
     fn listar(&mut self) -> Vec<Pantalla>;
     /// Brillo en la escala de Nexo. Devuelve el nivel final.
     fn poner(&mut self, id: u32, valor: u8) -> Result<u8, String>;
-    /// Sube o baja 1/16. Devuelve el nivel final.
-    fn paso(&mut self, id: u32, pasos: i32) -> Option<u8>;
+    /// Sube o baja `pasos` toques de `tamano` % (6 es 1/16). Devuelve el nivel final.
+    fn paso(&mut self, id: u32, pasos: i32, tamano: u8) -> Option<u8>;
     /// Nuevo brillo mínimo: el nivel de Nexo se mantiene y el monitor se pone con el mínimo nuevo.
     fn poner_minimo(&mut self, id: u32, minimo: u8) -> Result<u8, String>;
     fn ajustes(&mut self, id: u32) -> Result<vcp::AjustesMonitor, String>;
@@ -330,11 +368,11 @@ fn atender(
             }
         }
 
-        for (id, n) in lote.pasos {
+        for (id, (n, tamano)) in lote.pasos {
             if n == 0 {
                 continue;
             }
-            if let Some(nivel) = s.paso(id, n) {
+            if let Some(nivel) = s.paso(id, n, tamano) {
                 publicar(s.niveles());
                 (avisos.tecla)(id, nivel);
                 (avisos.cambio)(id, nivel);
@@ -354,7 +392,10 @@ pub use mac::{cambiar_modo, hacer_principal, limites, modos};
 mod win;
 
 #[cfg(windows)]
-pub use win::{area_de_trabajo, cambiar_modo, hacer_principal, id_bajo_el_cursor, limites, modos};
+pub use win::{
+    area_de_trabajo, cambiar_modo, hacer_principal, hay_integrada, id_bajo_el_cursor, id_integrada, limites, modos,
+    vigilar_portatil,
+};
 
 #[cfg(windows)]
 fn trabajador(
@@ -411,7 +452,7 @@ impl Sistema for Nada {
     fn poner(&mut self, _id: u32, _valor: u8) -> Result<u8, String> {
         Err("Todavía no disponible en este sistema".into())
     }
-    fn paso(&mut self, _id: u32, _pasos: i32) -> Option<u8> {
+    fn paso(&mut self, _id: u32, _pasos: i32, _tamano: u8) -> Option<u8> {
         None
     }
     fn poner_minimo(&mut self, _id: u32, _minimo: u8) -> Result<u8, String> {
@@ -621,9 +662,9 @@ mod mac {
             e.escribir(vcp::a_crudo(valor, e.minimo, e.maximo as u32))
         }
 
-        fn paso(&mut self, id: u32, pasos: i32) -> Option<u8> {
+        fn paso(&mut self, id: u32, pasos: i32, tamano: u8) -> Option<u8> {
             let e = self.externos.get_mut(&id)?;
-            let nuevo = vcp::paso(e.porcentaje(), pasos);
+            let nuevo = vcp::paso(e.porcentaje(), pasos, tamano);
             e.escribir(vcp::a_crudo(nuevo, e.minimo, e.maximo as u32)).ok()
         }
 

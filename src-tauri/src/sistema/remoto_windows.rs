@@ -18,10 +18,12 @@
 //! ni Win+↑ maximizando la ventana). Cada lote es completo (pulsa y suelta sus modificadores), así
 //! que en la Mac nada queda apretado aunque los gestos lleguen muy seguidos.
 //!
-//! El mismo gancho atiende las teclas de brillo (Ctrl+Alt+F1 / F2, ver `teclas`): se pone si la traducción
-//! o las teclas de brillo están encendidas, y nunca hay dos. Las de brillo valen con cualquier ventana al frente.
+//! El mismo gancho atiende los atajos de brillo (los que elige la persona; de fábrica Ctrl+Alt+F1 / F2, ver
+//! `teclas`): se pone si la traducción o las teclas de brillo están encendidas, y nunca hay dos. Los de brillo
+//! valen con cualquier ventana al frente.
 
 use std::cell::{Cell, RefCell};
+use super::teclas::Atajo;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tauri::AppHandle;
 use windows::Win32::Foundation::{CloseHandle, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
@@ -32,7 +34,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    SendInput, VIRTUAL_KEY, VK_CONTROL, VK_D, VK_E, VK_F1, VK_F2, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    SendInput, VIRTUAL_KEY, VK_CONTROL, VK_D, VK_E, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN,
     VK_MENU, VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_S, VK_SHIFT, VK_SNAPSHOT, VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -47,6 +49,9 @@ use windows::core::{PCWSTR, PWSTR};
 pub static ACTIVO: AtomicBool = AtomicBool::new(true);
 /// Si las teclas de brillo están encendidas (el ajuste "teclas de brillo"). La cambia `usar_brillo`.
 static BRILLO: AtomicBool = AtomicBool::new(false);
+/// Los atajos de brillo, empacados (ver `empacar`). Los cambia `poner_atajos_brillo`.
+static ATAJO_BAJAR: AtomicU32 = AtomicU32::new(empacar(Atajo::BAJAR));
+static ATAJO_SUBIR: AtomicU32 = AtomicU32::new(empacar(Atajo::SUBIR));
 
 /// Marca de las teclas que inyecta Nexo ("NEXO"): el gancho las deja pasar sin mirarlas.
 const MARCA: usize = 0x4E45_584F;
@@ -81,7 +86,18 @@ pub fn usar(activo: bool) {
     revisar();
 }
 
-/// Enciende o apaga las teclas de brillo (Ctrl+Alt+F1 / F2) en el mismo gancho.
+/// Un atajo en un número: la tecla en los 8 bits bajos y un bit por modificador. El gancho lo lee sin bloqueos.
+const fn empacar(a: Atajo) -> u32 {
+    (a.vk as u32 & 0xFF) | (a.ctrl as u32) << 8 | (a.alt as u32) << 9 | (a.shift as u32) << 10 | (a.win as u32) << 11
+}
+
+/// Cambia los atajos de brillo (ya revisados por `teclas`).
+pub fn poner_atajos_brillo(bajar: Atajo, subir: Atajo) {
+    ATAJO_BAJAR.store(empacar(bajar), Ordering::SeqCst);
+    ATAJO_SUBIR.store(empacar(subir), Ordering::SeqCst);
+}
+
+/// Enciende o apaga los atajos de brillo en el mismo gancho.
 pub fn usar_brillo(activo: bool) {
     BRILLO.store(activo, Ordering::SeqCst);
     revisar();
@@ -218,15 +234,16 @@ enum Accion {
     BuscarFinder,
 }
 
-/// Ctrl+Alt+F1 baja (−1) y Ctrl+Alt+F2 sube (+1) el brillo. Sin Win ni Shift, para no pisar otros atajos.
+/// El atajo de bajar da −1 y el de subir +1. Los modificadores tienen que ser justo los del atajo.
 fn tecla_de_brillo(vk: u16, m: u8) -> Option<i32> {
-    if m & CTRL == 0 || m & ALT == 0 || m & (WIN | MAYUS) != 0 {
-        return None;
-    }
-    match VIRTUAL_KEY(vk) {
-        VK_F1 => Some(-1),
-        VK_F2 => Some(1),
-        _ => None,
+    let pulsado =
+        empacar(Atajo { vk, ctrl: m & CTRL != 0, alt: m & ALT != 0, shift: m & MAYUS != 0, win: m & WIN != 0 });
+    if pulsado == ATAJO_BAJAR.load(Ordering::Relaxed) {
+        Some(-1)
+    } else if pulsado == ATAJO_SUBIR.load(Ordering::Relaxed) {
+        Some(1)
+    } else {
+        None
     }
 }
 
@@ -411,8 +428,13 @@ fn procesar(e: &mut Estado, k: &KBDLLHOOKSTRUCT) -> bool {
                 e.ultimo_brillo = Some(k.time);
                 super::teclas::pulsar(pasos);
             }
-            // Al soltar Alt va detrás de un relleno: la ventana del frente no abre su menú.
-            e.alt_usada = true;
+            // Al soltar Alt o Win va detrás de un relleno: la ventana del frente no abre su menú, ni se abre Inicio.
+            if e.mods & ALT != 0 {
+                e.alt_usada = true;
+            }
+            if e.mods & WIN != 0 {
+                e.win_usada = true;
+            }
             return true;
         }
     }

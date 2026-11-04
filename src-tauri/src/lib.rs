@@ -228,6 +228,10 @@ pub fn run() {
             dispositivos::abrir_ajustes_sonido,
             sistema::leer_ajustes,
             sistema::usar_teclas_brillo,
+            sistema::poner_atajo_brillo,
+            sistema::usar_teclas_portatil,
+            sistema::teclas_pantalla,
+            sistema::poner_teclas_pantalla,
             sistema::nivel_aviso,
             sistema::permisos,
             sistema::abrir_ajustes_privacidad,
@@ -302,8 +306,10 @@ pub fn run() {
                     let _ = otro.emit("brillo-cambio", CambioBrillo { id, nivel });
                 }),
             };
-            let minimos = sistema::ajustes::cargar(app.handle()).minimos_brillo.into_iter().collect();
-            let pantallas = Arc::new(Pantallas::iniciar(avisos, minimos));
+            let guardados = sistema::ajustes::cargar(app.handle());
+            let minimos = guardados.minimos_brillo.into_iter().collect();
+            let teclas = guardados.teclas_pantallas.into_iter().collect();
+            let pantallas = Arc::new(Pantallas::iniciar(avisos, minimos, teclas));
             app.manage(pantallas.clone());
             // Remoto (Mac): vigía de la sesión de RustDesk, atajos de Windows, captura con F13 y portapapeles liviano.
             sistema::remoto::iniciar(app.handle());
@@ -311,7 +317,9 @@ pub fn run() {
             sistema::drop::iniciar(app.handle());
             // Windows: busca versiones nuevas en la Mac a los 20 s y cada 30 min.
             sistema::actualizar::iniciar(app.handle());
-            if sistema::ajustes::cargar(app.handle()).teclas_brillo && sistema::teclas::permiso_concedido() {
+            // Windows: los atajos de brillo elegidos y si las teclas del portátil pasan al monitor bajo el mouse.
+            sistema::teclas::configurar(guardados.atajo_bajar, guardados.atajo_subir, guardados.teclas_portatil);
+            if guardados.teclas_brillo && sistema::teclas::permiso_concedido() {
                 let _ = sistema::teclas::activar(pantallas, true);
             }
 

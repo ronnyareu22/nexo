@@ -17,7 +17,7 @@ Tus dispositivos en un solo panel: audífonos y aparatos Bluetooth, monitores y 
 | Sonido de audífonos y parlantes | Volumen, silencio, usarlos como salida; usar su micrófono y su volumen | ✅ | escrito, sin probar (WASAPI) |
 | Pantallas | Brillo de la MacBook (DisplayServices) y de monitores externos (DDC/CI); resolución y principal | ✅ (externo sin probar) | escrito, sin probar (DDC/CI y WMI) |
 | Widget de escritorio | Audífonos, pantallas, Bluetooth y estado; abre Nexo en su sección | ✅ | ✅ (sin probar) |
-| Teclas de brillo | Con el mouse sobre el monitor externo, las teclas de la Mac cambian ese monitor y aparece un aviso de vidrio. En Windows, Ctrl + Alt + F1 / F2 sobre cualquier pantalla (viene encendido) | ✅ (sin probar) | escrito, sin probar |
+| Teclas de brillo | Con el mouse sobre el monitor externo, las teclas de la Mac cambian ese monitor y aparece un aviso de vidrio. En Windows, dos atajos a elección (de fábrica Ctrl + Alt + F1 / F2) sobre cualquier pantalla, y las teclas de brillo del portátil con el mouse sobre el monitor externo (viene encendido). Cada monitor elige si responde y su paso (3, 6 o 10 %) | ✅ (sin probar) | escrito, sin probar |
 | Luces (Wi-Fi o Bluetooth) | Encender, brillo, color | pendiente | pendiente |
 
 ## Carpetas

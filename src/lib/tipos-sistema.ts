@@ -277,6 +277,14 @@ export interface AjustesMonitor {
   conLista: boolean;
 }
 
+/** Cómo responde una pantalla a las teclas de brillo. */
+export interface TeclasPantalla {
+  /** Con el mouse encima, las teclas cambian esta pantalla. Si no, van a la del portátil (o la Mac). */
+  responde: boolean;
+  /** Cuánto cambia cada toque, en %: 3 (fino), 6 (normal, 1/16) o 10 (grande). */
+  paso: number;
+}
+
 /** Aviso del hilo de pantallas: cambió el brillo de una pantalla (escala de Nexo, 0–100). */
 export interface CambioBrillo {
   id: number;

@@ -11,11 +11,15 @@
 //! - Ajustes del monitor (contraste, color, entrada…): los mismos manejadores DDC, más su lista de capacidades
 //!   (GetCapabilitiesStringLength + CapabilitiesRequestAndCapabilitiesReply), leída una vez por monitor.
 //!
+//! - Teclas de brillo del portátil: su hilo escucha WmiMonitorBrightnessEvent. Si el mouse está sobre un monitor
+//!   externo, ese cambio pasa al monitor y el portátil vuelve a su nivel (ver `vigilar_portatil`).
+//!
 //! El `id` de cada pantalla es una huella de la ruta del monitor que da Windows
 //! (\\?\DISPLAY#...): no cambia mientras siga conectado al mismo puerto.
 
-use super::{Avisos, ModoPantalla, NO_RESPONDE, Orden, Pantalla, Sistema, minimo_en, vcp};
+use super::{Avisos, ModoPantalla, NO_RESPONDE, Orden, Pantalla, Pantallas, Sistema, minimo_en, vcp};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -75,6 +79,8 @@ struct Monitor {
     /// Ruta del monitor en minúsculas (\\?\display#...), para reconocerlo en WMI.
     ruta: String,
     interna: bool,
+    /// Su salida también muestra la pantalla del portátil (pantallas duplicadas, o es ella).
+    con_integrada: bool,
     principal: bool,
     /// Dónde está en el escritorio, en píxeles (para ordenar de izquierda a derecha y ubicar widgets).
     rect: RECT,
@@ -190,7 +196,8 @@ fn monitores() -> Vec<Monitor> {
         dispositivo[31] = 0;
         let gdi = texto(&dispositivo).to_lowercase();
         // Al duplicar pantallas, el monitor externo manda (es el que se controla por DDC).
-        let destino = destinos.get(&gdi).and_then(|v| v.iter().find(|d| !d.interna).or(v.first()));
+        let salida = destinos.get(&gdi);
+        let destino = salida.and_then(|v| v.iter().find(|d| !d.interna).or(v.first()));
         let id = match destino {
             Some(d) if !d.ruta.is_empty() => huella(&d.ruta),
             _ => huella(&gdi),
@@ -202,6 +209,7 @@ fn monitores() -> Vec<Monitor> {
             nombre: destino.map(|d| d.nombre.clone()).filter(|n| !n.is_empty()),
             ruta: destino.map(|d| d.ruta.clone()).unwrap_or_default(),
             interna: destino.is_some_and(|d| d.interna),
+            con_integrada: salida.is_some_and(|v| v.iter().any(|d| d.interna)),
             principal: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
             rect: info.monitorInfo.rcMonitor,
             trabajo: info.monitorInfo.rcWork,
@@ -214,8 +222,7 @@ fn buscar(id: u32) -> Option<Monitor> {
     monitores().into_iter().find(|m| m.id == id)
 }
 
-/// La pantalla que está bajo el mouse (para las teclas de brillo). No toca DDC ni WMI.
-pub fn id_bajo_el_cursor() -> Option<u32> {
+fn monitor_bajo_el_cursor() -> Option<Monitor> {
     let mut punto = POINT::default();
     // Falla con la pantalla bloqueada o en el escritorio seguro: entonces no hay pantalla.
     unsafe { GetCursorPos(&mut punto) }.ok()?;
@@ -223,7 +230,27 @@ pub fn id_bajo_el_cursor() -> Option<u32> {
     if h.is_invalid() {
         return None;
     }
-    monitores().into_iter().find(|m| m.hmonitor == h).map(|m| m.id)
+    monitores().into_iter().find(|m| m.hmonitor == h)
+}
+
+/// La pantalla que está bajo el mouse (para las teclas de brillo). No toca DDC ni WMI.
+pub fn id_bajo_el_cursor() -> Option<u32> {
+    monitor_bajo_el_cursor().map(|m| m.id)
+}
+
+/// La pantalla del portátil, si está encendida (con la tapa cerrada no está).
+pub fn id_integrada() -> Option<u32> {
+    monitores().into_iter().find(|m| m.interna).map(|m| m.id)
+}
+
+/// Si la PC tiene pantalla de portátil encendida (para mostrar "teclas del portátil"). No toca DDC ni WMI.
+pub fn hay_integrada() -> bool {
+    id_integrada().is_some()
+}
+
+/// El monitor externo bajo el mouse. Nada si es la pantalla del portátil o si la duplica.
+fn externa_bajo_el_cursor() -> Option<u32> {
+    monitor_bajo_el_cursor().filter(|m| !m.interna && !m.con_integrada).map(|m| m.id)
 }
 
 /// Zona útil de una pantalla (sin la barra de tareas), en píxeles físicos, y su escala (1,0 = 96 ppp).
@@ -450,16 +477,9 @@ impl Wmi {
         Some(lecturas)
     }
 
-    /// La ruta (__PATH) del objeto con el método WmiSetBrightness de esa pantalla.
     fn ruta_metodos(&mut self, instancia: &str) -> Option<String> {
         let s = self.conectar()?;
-        let objetos = consultar(&s, "SELECT * FROM WmiMonitorBrightnessMethods WHERE Active = TRUE");
-        let rutas: Vec<(String, String)> = objetos
-            .iter()
-            .filter_map(|o| Some((leer_texto(o, w!("InstanceName"))?, leer_texto(o, w!("__PATH"))?)))
-            .collect();
-        let elegida = rutas.iter().find(|(i, _)| i.eq_ignore_ascii_case(instancia)).or(rutas.first());
-        elegida.map(|(_, r)| r.clone())
+        ruta_metodos(&s, instancia)
     }
 
     /// WmiSetBrightness(Timeout = 0, Brightness = valor).
@@ -500,6 +520,17 @@ fn abrir_wmi() -> windows::core::Result<IWbemServices> {
         )?;
         Ok(s)
     }
+}
+
+/// La ruta (__PATH) del objeto con el método WmiSetBrightness de esa pantalla.
+fn ruta_metodos(s: &IWbemServices, instancia: &str) -> Option<String> {
+    let objetos = consultar(s, "SELECT * FROM WmiMonitorBrightnessMethods WHERE Active = TRUE");
+    let rutas: Vec<(String, String)> = objetos
+        .iter()
+        .filter_map(|o| Some((leer_texto(o, w!("InstanceName"))?, leer_texto(o, w!("__PATH"))?)))
+        .collect();
+    let elegida = rutas.iter().find(|(i, _)| i.eq_ignore_ascii_case(instancia)).or(rutas.first());
+    elegida.map(|(_, r)| r.clone())
 }
 
 fn consultar(s: &IWbemServices, wql: &str) -> Vec<IWbemClassObject> {
@@ -739,7 +770,11 @@ impl Estado {
         let escrito = match &c.via {
             Via::Wmi { ruta } => {
                 let ruta = ruta.clone();
-                self.wmi.poner(&ruta, crudo.min(100) as u8)
+                // Lo cambia Nexo: el vigía de las teclas del portátil no lo pasa al monitor.
+                marcar_escrito_por_nexo();
+                let r = self.wmi.poner(&ruta, crudo.min(100) as u8);
+                marcar_escrito_por_nexo();
+                r
             }
             Via::Ddc { .. } => match c.manejador() {
                 Some(h) if escribir_vcp(h, BRILLO_VCP, crudo) => Ok(()),
@@ -800,10 +835,10 @@ impl Sistema for Estado {
         self.escribir(id, vcp::a_crudo(valor, minimo, maximo))
     }
 
-    /// Sube o baja en pasos de 1/16 (como en Mac). Devuelve el nivel final.
-    fn paso(&mut self, id: u32, pasos: i32) -> Option<u8> {
+    /// Sube o baja en pasos del tamaño elegido (el normal es 1/16, como en Mac). Devuelve el nivel final.
+    fn paso(&mut self, id: u32, pasos: i32, tamano: u8) -> Option<u8> {
         let c = self.controles.get(&id)?;
-        let crudo = vcp::a_crudo(vcp::paso(c.porcentaje(), pasos), c.minimo, c.maximo);
+        let crudo = vcp::a_crudo(vcp::paso(c.porcentaje(), pasos, tamano), c.minimo, c.maximo);
         self.escribir(id, crudo).ok()
     }
 
@@ -877,6 +912,235 @@ pub(super) fn trabajador(
     if com.is_ok() {
         unsafe { CoUninitialize() };
     }
+}
+
+// ---------------------------------------------------------------- Teclas de brillo del portátil
+//
+// Las teclas de brillo del portátil (F6/F7, Fn+…) no llegan como teclas: el firmware cambia el brillo y Windows
+// muestra su propio aviso. Por eso se escucha el cambio (WmiMonitorBrightnessEvent) y no la tecla.
+// Si el mouse está sobre un monitor externo, cada cambio es un paso en ese monitor (1/16 por defecto, como en la Mac),
+// con el aviso de Nexo allá, y el portátil vuelve a su nivel. El aviso de Windows sale igual: no se puede quitar.
+// Límite: con el portátil en 0 % o 100 %, la tecla que sigue en esa dirección no cambia nada y WMI no avisa;
+// entonces Nexo no se entera. No se mueve el portátil para evitarlo.
+
+/// Si se escuchan las teclas del portátil (el ajuste "teclas de brillo"). La cambia `vigilar_portatil`.
+static VIGILAR: AtomicBool = AtomicBool::new(false);
+/// Si el hilo que escucha está vivo (hay uno solo).
+static VIGIA_VIVO: AtomicBool = AtomicBool::new(false);
+/// Cuándo puso Nexo el brillo del portátil desde el panel, las escenas o los widgets.
+static ESCRITO_POR_NEXO: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Un cambio que llega hasta 1 s después de que Nexo puso el brillo del portátil es de Nexo.
+const ECO_NEXO: Duration = Duration::from_secs(1);
+/// El aviso de que el portátil volvió a su nivel llega antes de esto.
+const ECO_REGRESO: Duration = Duration::from_millis(1500);
+/// Una tecla mueve el portátil de 3 a 25 puntos (Windows usa 10; algunos, 5). Menos es el brillo automático;
+/// más, el plan de energía al enchufar o desenchufar. Esos no pasan al monitor.
+const TOQUE: std::ops::RangeInclusive<i32> = 3..=25;
+/// Si la escucha se corta, se vuelve a pedir unas pocas veces (con pausa), no sin parar.
+const REINTENTOS_VIGIA: u32 = 3;
+
+fn marcar_escrito_por_nexo() {
+    if let Ok(mut t) = ESCRITO_POR_NEXO.lock() {
+        *t = Some(Instant::now());
+    }
+}
+
+fn escrito_por_nexo_hace_poco() -> bool {
+    ESCRITO_POR_NEXO.lock().ok().and_then(|t| *t).is_some_and(|t| t.elapsed() < ECO_NEXO)
+}
+
+/// Enciende o apaga el paso de las teclas de brillo del portátil al monitor bajo el mouse (lo llama `teclas::activar`).
+/// Al encender crea el hilo que escucha a WMI; al apagar, ese hilo termina solo en menos de 1 s.
+pub fn vigilar_portatil(pantallas: Arc<Pantallas>, encendido: bool) {
+    VIGILAR.store(encendido, Ordering::SeqCst);
+    if !encendido || VIGIA_VIVO.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let hilo = std::thread::Builder::new()
+        .name("nexo-brillo-portatil".into())
+        .stack_size(256 * 1024)
+        .spawn(move || vigia_portatil(pantallas));
+    if let Err(e) = hilo {
+        VIGIA_VIVO.store(false, Ordering::SeqCst);
+        eprintln!("Nexo: no se pudo escuchar el brillo del portátil ({e})");
+    }
+}
+
+/// Cómo terminó una escucha.
+enum Fin {
+    /// Se apagó el ajuste.
+    Apagado,
+    /// No se pudo empezar: no se insiste.
+    Fallo(String),
+    /// Andaba y se cortó (quizá se reinició WMI): se puede volver a pedir.
+    Cortado(String),
+}
+
+fn vigia_portatil(pantallas: Arc<Pantallas>) {
+    // COM propio (MTA). S_FALSE (ya estaba) y RPC_E_CHANGED_MODE (otro modo) también sirven.
+    let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    let mut seguir = com.is_ok() || com == RPC_E_CHANGED_MODE;
+    if !seguir {
+        VIGIA_VIVO.store(false, Ordering::SeqCst);
+        eprintln!("Nexo: no se pudo escuchar el brillo del portátil (COM {:#010x})", com.0);
+    }
+    let mut cortes = 0;
+    while seguir {
+        // Los objetos de WMI se sueltan dentro de `escuchar_portatil`, antes de cerrar COM.
+        let apagado = match escuchar_portatil(&pantallas) {
+            Fin::Apagado => true,
+            Fin::Fallo(e) => {
+                eprintln!("Nexo: no se puede escuchar el brillo del portátil ({e}); sus teclas no pasan al monitor");
+                false
+            }
+            Fin::Cortado(e) if cortes < REINTENTOS_VIGIA => {
+                cortes += 1;
+                eprintln!("Nexo: se cortó la escucha del brillo del portátil ({e}); se vuelve a pedir en 10 s");
+                // Pausa en pasos de 1 s: si apagan el ajuste, termina enseguida.
+                for _ in 0..10 {
+                    if !VIGILAR.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                if VIGILAR.load(Ordering::SeqCst) {
+                    continue;
+                }
+                true
+            }
+            Fin::Cortado(e) => {
+                eprintln!("Nexo: se cortó la escucha del brillo del portátil ({e}); no se insiste más");
+                false
+            }
+        };
+        VIGIA_VIVO.store(false, Ordering::SeqCst);
+        // Si lo encendieron justo mientras se apagaba, este mismo hilo sigue.
+        seguir = apagado && VIGILAR.load(Ordering::SeqCst) && !VIGIA_VIVO.swap(true, Ordering::SeqCst);
+    }
+    if com.is_ok() {
+        unsafe { CoUninitialize() };
+    }
+}
+
+/// Lo que el vigía sabe del brillo del portátil.
+struct Portatil {
+    servicios: IWbemServices,
+    /// Último nivel que dio WMI.
+    visto: Option<u8>,
+    /// Nivel al que Nexo devolvió el portátil y cuándo (su aviso aún no llega).
+    regreso: Option<(u8, Instant)>,
+    /// Ruta del objeto con WmiSetBrightness (se busca la primera vez).
+    ruta: Option<String>,
+}
+
+impl Portatil {
+    /// Un aviso de WMI: el portátil quedó en `nuevo`.
+    fn al_cambiar(&mut self, nuevo: u8, instancia: &str, pantallas: &Pantallas) {
+        let antes = self.visto.replace(nuevo);
+        // El portátil volvió al nivel que pidió Nexo: es su propio cambio.
+        if let Some((nivel, cuando)) = self.regreso {
+            if cuando.elapsed() > ECO_REGRESO {
+                self.regreso = None;
+            } else if nivel == nuevo {
+                self.regreso = None;
+                return;
+            }
+        }
+        if escrito_por_nexo_hace_poco() || !VIGILAR.load(Ordering::Relaxed) {
+            return;
+        }
+        let Some(antes) = antes else { return };
+        let cambio = nuevo as i32 - antes as i32;
+        if !TOQUE.contains(&cambio.abs()) {
+            return;
+        }
+        let Some(id) = externa_bajo_el_cursor() else { return };
+        // Ese monitor no responde a las teclas (su ajuste): el portátil queda como lo dejó la tecla.
+        if !pantallas.teclas_de(id).responde {
+            return;
+        }
+        if !pantallas.es_controlable(id) {
+            // Quizá se acaba de conectar o se activó DDC/CI: la próxima vez ya estará. Ahora el portátil queda así.
+            pantallas.refrescar();
+            return;
+        }
+        // Un paso por aviso (del tamaño elegido para ese monitor); si llegan varios seguidos, el hilo de pantallas
+        // los junta y muestra el aviso.
+        pantallas.paso(id, cambio.signum());
+        // El portátil vuelve al nivel de antes del toque (o al que ya se estaba devolviendo).
+        let base = self.regreso.map(|(n, _)| n).unwrap_or(antes);
+        self.devolver(base, instancia);
+    }
+
+    /// WmiSetBrightness al nivel de antes, marcado como de Nexo.
+    fn devolver(&mut self, nivel: u8, instancia: &str) {
+        if self.visto == Some(nivel) {
+            return;
+        }
+        if self.ruta.is_none() {
+            self.ruta = ruta_metodos(&self.servicios, instancia);
+        }
+        let Some(ruta) = self.ruta.as_deref() else { return };
+        self.regreso = Some((nivel, Instant::now()));
+        match poner_wmi(&self.servicios, ruta, nivel) {
+            // Ya está ahí aunque su aviso llegue tarde (o no llegue): el próximo toque se mide desde aquí.
+            Ok(()) => self.visto = Some(nivel),
+            Err(e) => {
+                self.regreso = None;
+                self.ruta = None;
+                eprintln!("Nexo: no se pudo devolver el brillo del portátil ({:#010x})", e.code().0);
+            }
+        }
+    }
+}
+
+/// Se suscribe a WmiMonitorBrightnessEvent y atiende cada aviso hasta que se apague el ajuste.
+fn escuchar_portatil(pantallas: &Pantallas) -> Fin {
+    let servicios = match abrir_wmi() {
+        Ok(s) => s,
+        Err(e) => return Fin::Fallo(format!("WMI {:#010x}", e.code().0)),
+    };
+    let banderas = WBEM_FLAG_RETURN_IMMEDIATELY | WBEM_FLAG_FORWARD_ONLY;
+    let consulta = BSTR::from("SELECT * FROM WmiMonitorBrightnessEvent");
+    let eventos = match unsafe { servicios.ExecNotificationQuery(&BSTR::from("WQL"), &consulta, banderas, None) } {
+        Ok(e) => e,
+        Err(e) => return Fin::Fallo(format!("suscripción {:#010x}", e.code().0)),
+    };
+    // Igual que en la conexión: sin esto WMI puede negar el acceso al pedir los avisos.
+    let _ = unsafe {
+        CoSetProxyBlanket(
+            &eventos,
+            AUTENTICACION_WINNT,
+            AUTORIZACION_NINGUNA,
+            PCWSTR::null(),
+            RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+        )
+    };
+    // Nivel de partida (en una PC de escritorio no hay: se toma del primer aviso).
+    let visto = consultar(&servicios, "SELECT CurrentBrightness FROM WmiMonitorBrightness WHERE Active = TRUE")
+        .first()
+        .and_then(|o| leer_numero(o, w!("CurrentBrightness")))
+        .map(|b| b.clamp(0, 100) as u8);
+    let mut portatil = Portatil { servicios, visto, regreso: None, ruta: None };
+
+    while VIGILAR.load(Ordering::SeqCst) {
+        let mut objetos: [Option<IWbemClassObject>; 1] = [None];
+        let mut n = 0u32;
+        // Espera hasta 1 s (WBEM_S_TIMEDOUT si no hubo nada): así ve pronto si se apagó el ajuste.
+        let hr = unsafe { eventos.Next(1000, &mut objetos, &mut n) };
+        if hr.is_err() {
+            return Fin::Cortado(format!("{:#010x}", hr.0));
+        }
+        let Some(o) = objetos[0].take().filter(|_| n > 0) else { continue };
+        let Some(nuevo) = leer_numero(&o, w!("Brightness")) else { continue };
+        let instancia = leer_texto(&o, w!("InstanceName")).unwrap_or_default();
+        portatil.al_cambiar(nuevo.clamp(0, 100) as u8, &instancia, pantallas);
+    }
+    Fin::Apagado
 }
 
 // ---------------------------------------------------------------- Resolución y frecuencia
