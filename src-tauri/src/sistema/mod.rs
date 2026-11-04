@@ -2,13 +2,21 @@
 //! permisos, abrir Nexo al iniciar sesión, el widget de escritorio, el remoto (RustDesk por Tailscale)
 //! y Nexo Drop (archivos, textos y enlaces entre los equipos del dueño por Tailscale).
 //! Mi setup: el mapa de la casa y la oficina (`setup`) y las escenas de un toque (`escenas`).
+//! El ícono de la barra de menús o de la bandeja y sus accesos rápidos (`bandeja`).
+//! Windows: actualizaciones desde la Mac (`actualizar`), una sola copia abierta (`instancia`), lo de la primera vez
+//! (`primer_inicio`) y el registro de fallos al arrancar (`fallos`).
 
+pub mod actualizar;
 pub mod ajustes;
 pub mod arranque;
 pub mod aviso;
+pub mod bandeja;
 pub mod drop;
 pub mod escenas;
+pub mod fallos;
+pub mod instancia;
 pub mod permisos;
+pub mod primer_inicio;
 pub mod remoto;
 #[cfg(windows)]
 pub mod remoto_windows;

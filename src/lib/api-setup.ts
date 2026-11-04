@@ -1,8 +1,9 @@
 // Llamadas a Rust para Mi setup: los aparatos de tus equipos, el mapa de la casa y la oficina, y las escenas.
 // Fuera de la app (por ejemplo `pnpm preview` en el navegador) usa datos de ejemplo para ver el diseño:
 // `?seccion=setup` muestra todo; con `&setup=editar` abre el mapa para acomodarlo, `&setup=apagada` muestra el
-// PC de la oficina apagado (con lo último que se vio), `&setup=sin` sin otro equipo y `&setup=fallo` una escena
-// a la que le falla un paso.
+// PC de la oficina apagado (con lo último que se vio), `&setup=sin` sin otro equipo, `&setup=fallo` una escena
+// a la que le falla un paso, `&setup=escena` abre el editor de la primera escena y `&setup=aparatos`, además,
+// la lista para agregar un dispositivo.
 import { invoke } from '@tauri-apps/api/core';
 import type {
   Accion,

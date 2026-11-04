@@ -3,7 +3,8 @@
 //! Cada familia de aparatos tiene su propio módulo (hoy Bluetooth; luego monitores y luces).
 //! Todos devuelven el mismo `Dispositivo`, así el panel los muestra igual.
 
-mod audio;
+// El menú del ícono (sistema/bandeja.rs) también usa el sonido.
+pub mod audio;
 mod bluetooth;
 pub mod historial;
 pub mod pantallas;

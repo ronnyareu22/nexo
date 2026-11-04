@@ -74,10 +74,10 @@ impl Pantallas {
         let controlables = Arc::new(Mutex::new(HashSet::new()));
         let brillos_externos = Arc::new(Mutex::new(HashMap::new()));
         let (c, b) = (controlables.clone(), brillos_externos.clone());
-        std::thread::Builder::new()
-            .name("nexo-pantallas".into())
-            .spawn(move || trabajador(rx, c, b, aviso))
-            .expect("no se pudo iniciar el hilo de pantallas");
+        // Si el hilo no se crea, Nexo abre igual: sin él, las pantallas salen vacías y el brillo dice que falló.
+        if let Err(e) = std::thread::Builder::new().name("nexo-pantallas".into()).spawn(move || trabajador(rx, c, b, aviso)) {
+            eprintln!("Nexo: no se pudo iniciar el hilo de pantallas ({e})");
+        }
         let p = Self { tx: Mutex::new(tx), controlables, brillos_externos };
         p.enviar(Orden::Refrescar);
         p

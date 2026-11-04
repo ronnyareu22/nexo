@@ -33,6 +33,7 @@ use progreso::Progreso;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -141,6 +142,16 @@ pub enum Copiado {
 }
 
 static COPIAR_IMAGENES: AtomicBool = AtomicBool::new(true);
+
+/// Lo último que se supo de los destinos: el menú del ícono lo usa sin volver a preguntar.
+static DESTINOS: Mutex<Vec<Destino>> = Mutex::new(Vec::new());
+
+/// Cómo terminó un envío (lo usa el menú del ícono para avisar).
+pub enum FinEnvio {
+    Listo,
+    Cancelado,
+    Fallo(String),
+}
 
 /// Arranque: lee el historial y los ajustes y, si está encendido, levanta el receptor.
 pub fn iniciar(app: &AppHandle) {
@@ -288,6 +299,46 @@ fn estado(app: &AppHandle) -> EstadoDrop {
     }
 }
 
+/// Busca los destinos y los recuerda. Si cambió a cuáles se les puede mandar, pone al día el menú del ícono.
+pub fn buscar_destinos(app: &AppHandle) -> Vec<Destino> {
+    let lista = envio::destinos(app);
+    let cambio = {
+        let mut guardados = DESTINOS.lock().unwrap_or_else(|e| e.into_inner());
+        let cambio = en_linea(&guardados) != en_linea(&lista);
+        guardados.clone_from(&lista);
+        cambio
+    };
+    if cambio {
+        super::bandeja::actualizar(app);
+    }
+    lista
+}
+
+/// (dirección, nombre) de los destinos donde Nexo respondió.
+fn en_linea(lista: &[Destino]) -> Vec<(String, String)> {
+    lista.iter().filter(|d| d.en_linea).map(|d| (d.ip.clone(), d.nombre.clone())).collect()
+}
+
+/// Los destinos donde Nexo respondió en la última búsqueda. No le pregunta a nadie.
+pub fn destinos_en_linea() -> Vec<(String, String)> {
+    en_linea(&DESTINOS.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Cómo terminó un envío; `None` mientras sigue en la cola o en curso.
+pub fn como_termino(lote: &str) -> Option<FinEnvio> {
+    if progreso::en_curso().iter().any(|p| p.lote == lote && p.direccion == "enviado") {
+        return None;
+    }
+    // Al terminar, la entrada del historial se anota antes de soltar el avance.
+    Some(match historial::buscar_lote(lote) {
+        Some(e) if e.estado == "completo" => FinEnvio::Listo,
+        Some(e) if e.estado == "cancelado" => FinEnvio::Cancelado,
+        Some(e) => FinEnvio::Fallo(e.error.unwrap_or_else(|| "No se pudo enviar.".into())),
+        // Sin entrada: se canceló en la cola o no llegó a salir.
+        None => FinEnvio::Cancelado,
+    })
+}
+
 async fn en_segundo_plano<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
 }
@@ -297,7 +348,7 @@ async fn en_segundo_plano<T: Send + 'static>(f: impl FnOnce() -> Result<T, Strin
 /// Los otros equipos del dueño en Tailscale (Mac o Windows), con si Nexo responde en cada uno.
 #[tauri::command]
 pub async fn drop_destinos(app: AppHandle) -> Vec<Destino> {
-    tauri::async_runtime::spawn_blocking(move || envio::destinos(&app)).await.unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(move || buscar_destinos(&app)).await.unwrap_or_default()
 }
 
 /// Manda archivos y carpetas a otro equipo. Devuelve el lote; el avance llega por "drop-progreso".

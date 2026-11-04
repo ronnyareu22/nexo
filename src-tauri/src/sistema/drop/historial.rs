@@ -143,6 +143,11 @@ pub fn buscar(id: u64) -> Option<Entrada> {
     bloquear().iter().find(|e| e.id == id).cloned()
 }
 
+/// La entrada de un envío, por su lote.
+pub fn buscar_lote(lote: &str) -> Option<Entrada> {
+    bloquear().iter().find(|e| e.lote.as_deref() == Some(lote)).cloned()
+}
+
 /// Borra todo el historial (los archivos recibidos no se tocan).
 pub fn borrar() {
     bloquear().clear();

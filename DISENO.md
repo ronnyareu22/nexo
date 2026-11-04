@@ -34,9 +34,9 @@ src/                      Interfaz (no llama APIs del sistema; solo `lib/api.ts`
   lib/estilos/global.css  Tokens y temas
   lib/componentes/        Tarjetas, paneles, interruptor, deslizador, anillo…
 src-tauri/src/
-  lib.rs                  Arranque, bandeja, ventana, vigía
+  lib.rs                  Arranque, ventana, vigía
   dispositivos/           Adaptadores: bluetooth, audio, pantallas, historial
-  sistema/                Teclas de brillo, aviso en pantalla, ajustes
+  sistema/                Teclas de brillo, aviso en pantalla, ajustes, menú del ícono (bandeja.rs)
 ```
 
 **Qué hay hoy** (✅ funciona y está probado · ⚠️ está hecho pero sin probar con el aparato real · ⏳ pendiente):
@@ -59,6 +59,7 @@ src-tauri/src/
 | Interfaz nueva: barra lateral, Inicio, Dispositivos, Audio, Pantallas, Automatizaciones, Ajustes | ✅ revisada en claro y oscuro con datos reales | ✅ (misma interfaz) |
 | XDrop (antes Nexo Drop): archivos, carpetas, textos, enlaces y capturas entre tus equipos por Tailscale (puerto 47821) | ⚠️ escrito, sin probar entre los dos equipos | ⚠️ escrito y compilado con cargo-xwin, sin probar (sin "Enviar captura") |
 | Audio como mezclador: tiras verticales, silencio del micrófono, "Probar sonido" y volumen de avisos | ⚠️ escrito; el silencio del micrófono depende del aparato · avisos con `osascript` | ⚠️ escrito y compilado con cargo-xwin (sin volumen de avisos) |
+| Menú del ícono con accesos rápidos: captura de zona (F13), enviar por XDrop, escenas, salida y micrófono, silencio, brillo, conectar audífonos, remoto | ⚠️ escrito; el armado del menú tiene pruebas (`cargo test --lib bandeja`), sin probar en la app | ⚠️ escrito y compilado con cargo-xwin, sin probar (sin captura de zona) |
 | Mi setup: escenas de un toque (también en el menú del ícono) y el mapa editable de la casa y la oficina (`GET /nexo/aparatos` por XDrop) | ⚠️ escrito; lógica pura con pruebas (`cargo test --lib setup escenas`), sin probar con los aparatos ni entre los dos equipos | ⚠️ escrito y compilado con cargo-xwin, sin probar ("Modo remoto" abre RustDesk) |
 
 **Medidas actuales:** la app pesa 4,5 MB y el proceso principal usa unos 27 MB. Con el panel abierto se suman unos 70 MB del motor web, que se liberan al cerrar el panel.
@@ -184,9 +185,9 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - Atajos frecuentes.
    - **Actividad reciente**, sacada del historial real ("WH-CH520 se conectó a las 12:40").
 1b. **Mi setup** (`vistas/MiSetup.svelte`, escrito el 3 nov; pedido del dueño: "ver todos mis dispositivos como un mapa… decir modo estudio y que pum active eso"). Liviano: 2D, sin Three.js, sin bucles.
-   - **Escenas** (`sistema/escenas.rs`, `escenas.json`): tarjetas grandes de un toque con el paso en curso, "Listo" o qué paso falló. Pasos: brillo, conectar, desconectar, salida de sonido, volumen, micrófono, modo trabajo (solo Mac), abrir una app y luces (a la espera: nunca se ejecuta). La primera vez: Modo estudio, remoto, noche y reunión, con los aparatos que haya. También en el submenú "Escenas" del ícono.
+   - **Escenas** (`sistema/escenas.rs`, `escenas.json`): tarjetas de un toque con el paso en curso, "Listo" o qué paso falló. Cada una lleva arriba su ilustración plana (una por ícono, más "nueva"), generada con `python3 diseno/escenas/generar.py` (calco del de SIAU) en `static/escenas` y pegada en línea por `IlustracionEscena.svelte`, que sigue el tema con `lib/estilos/ilustraciones.css`. Van en una sola fila pareja: si no caben, se desliza con imán y flechas. El editor agrega pasos desde "Agregar dispositivo" (foto, nombre y equipo; lo del otro equipo se ve, pero no se elige) y el brillo puede ir a una pantalla por su nombre (`"nombre:<pantalla>"`). Pasos: brillo, conectar, desconectar, salida de sonido, volumen, micrófono, modo trabajo (solo Mac), abrir una app y luces (a la espera: nunca se ejecuta). La primera vez: Modo estudio, remoto, noche y reunión, con los aparatos que haya. También en el submenú "Escenas" del ícono.
    - **Mapa** (`sistema/setup.rs`, `setup.json`): un escritorio de frente por lugar (Casa = la Mac, Oficina = el PC) con pared, mesa y tres capas de profundidad, y las fotos reales de los aparatos y de la decoración (`static/setup`). Verde y resplandor si está encendido; tenue si no. El otro equipo llega por XDrop (`GET /nexo/aparatos`, misma seguridad); si está apagado, lo último que se vio queda tenue (`setup-visto.json`). "Editar mi setup": arrastrar, capas, tamaño, quitar y sumar lo detectado o decoración.
-   - Para revisarlo fuera de la app: `?seccion=setup`, con `&setup=editar`, `apagada`, `sin` o `fallo`.
+   - Para revisarlo fuera de la app: `?seccion=setup`, con `&setup=editar`, `apagada`, `sin`, `fallo`, `escena` (abre el editor) o `aparatos` (el editor con la lista de dispositivos).
 2. **Dispositivos** (el orden importa, pedido del dueño)
    - Al centro, "Mis dispositivos", tarjetas grandes con foto, nombre, estado y chevron, y al final "+ Agregar dispositivo", que abre Ajustes › Bluetooth porque el emparejamiento lo hace el sistema.
    - **Panel a la derecha, de arriba abajo:**
@@ -213,7 +214,7 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
    - Cada pantalla con brillo, resolución, frecuencia, cuál es la principal y su posición.
    - El atajo de teclas de brillo.
 5. **Remoto** (hecho el 3 nov; el dueño controla la Mac desde la PC del trabajo con RustDesk por Tailscale)
-   - **Estado:** quién está conectado, si va directo por Tailscale o por relé, y el estado de Tailscale y RustDesk.
+   - **Estado:** quién está conectado, si va directo por Tailscale o por relé, y el estado de Tailscale y RustDesk en fichas. A la izquierda, la ilustración del PC y la Mac con Tailscale al medio (`remoto-conectado`, `remoto` o `remoto-sin`, del mismo generador).
      - Mac: "Preparar para el trabajo" y "Abrir RustDesk".
      - Windows: "Conectar a mi Mac" (`rustdesk --connect 100.88.188.99`).
    - **Atajos de Windows en la Mac** (`sistema/remoto/teclado.rs`): Ctrl → ⌘, Inicio/Fin, Alt+Tab, escritorios.

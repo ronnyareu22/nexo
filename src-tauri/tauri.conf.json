@@ -33,7 +33,8 @@
         "installMode": "currentUser",
         "languages": [
           "Spanish"
-        ]
+        ],
+        "installerHooks": "./windows/hooks.nsh"
       }
     },
     "macOS": {

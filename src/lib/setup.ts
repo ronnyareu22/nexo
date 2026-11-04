@@ -559,11 +559,20 @@ function aparatoDe(a: Accion, nombrePor: NombrePor) {
   return 'dispositivo' in a ? nombrePor(a.dispositivo, a.nombre) : '';
 }
 
+/** El brillo de una pantalla por su nombre ("nombre:Steren 27\" IPS"). */
+export const brilloDe = (nombre: string) => `nombre:${nombre}` as const;
+/** La pantalla de un paso de brillo, si es una por su nombre. */
+export const pantallaDe = (a: Accion): string | null =>
+  a.tipo === 'brillo' && a.pantalla.startsWith('nombre:') ? a.pantalla.slice('nombre:'.length) : null;
+
 /** Un paso en corto, para el resumen ("Brillo 70 %"). */
 function corto(a: Accion, nombrePor: NombrePor): string {
   switch (a.tipo) {
-    case 'brillo':
+    case 'brillo': {
+      const p = pantallaDe(a);
+      if (p) return `Brillo de ${p} ${a.valor} %`;
       return a.pantalla === 'principal' ? `Brillo de la principal ${a.valor} %` : `Brillo ${a.valor} %`;
+    }
     case 'conectar':
       return `Conecta ${aparatoDe(a, nombrePor)}`;
     case 'desconectar':
@@ -606,8 +615,10 @@ export function resumen(e: Escena, nombrePor: NombrePor): string {
 /** Lo que está haciendo ahora ("Conectando WH-CH520"). */
 export function haciendo(a: Accion, nombrePor: NombrePor): string {
   switch (a.tipo) {
-    case 'brillo':
-      return `Poniendo el brillo al ${a.valor} %`;
+    case 'brillo': {
+      const p = pantallaDe(a);
+      return p ? `Poniendo el brillo de ${p} al ${a.valor} %` : `Poniendo el brillo al ${a.valor} %`;
+    }
     case 'conectar':
       return `Conectando ${aparatoDe(a, nombrePor)}`;
     case 'desconectar':
@@ -632,8 +643,10 @@ export function haciendo(a: Accion, nombrePor: NombrePor): string {
 /** Un paso como orden, para decir cuál falló ("Conectar WH-CH520"). */
 export function paso(a: Accion, nombrePor: NombrePor): string {
   switch (a.tipo) {
-    case 'brillo':
-      return `Brillo al ${a.valor} %`;
+    case 'brillo': {
+      const p = pantallaDe(a);
+      return p ? `Brillo de ${p} al ${a.valor} %` : `Brillo al ${a.valor} %`;
+    }
     case 'conectar':
       return `Conectar ${aparatoDe(a, nombrePor)}`;
     case 'desconectar':

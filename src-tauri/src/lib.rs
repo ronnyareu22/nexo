@@ -1,7 +1,7 @@
 //! Nexo: arranque de la app.
 //!
 //! - Vive en la barra de menús (Mac) o en la bandeja (Windows) con un ícono.
-//! - Clic en el ícono o doble clic en la app: abre el panel.
+//! - Clic en el ícono o doble clic en la app: abre el panel. Su menú tiene accesos rápidos (sistema/bandeja.rs).
 //! - Al cerrar el panel se destruye su ventana para liberar memoria; la app sigue en segundo plano.
 //! - El widget de escritorio (sistema/widget.rs) vive aparte y abre el panel en la sección de cada casilla.
 
@@ -15,12 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri_plugin_notification::NotificationExt;
 
-use tauri::{
-    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
-    image::Image,
-    menu::{CheckMenuItem, Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 /// Las secciones del panel (las mismas de `src/routes/+page.svelte`).
 const SECCIONES: [&str; 9] =
@@ -128,11 +123,12 @@ fn huella(estado: &dispositivos::Estado) -> String {
 
 /// Vigía: cada 20 s mira qué está conectado, anota el historial y aplica los ajustes automáticos.
 fn iniciar_vigia(app: AppHandle, historial: Arc<Historial>) {
-    std::thread::Builder::new()
+    let vigia = std::thread::Builder::new()
         .name("nexo-vigia".into())
         .spawn(move || {
             let mut huella_anterior = String::new();
             loop {
+                let mut aparatos = None;
                 if let Ok(estado) = dispositivos::listar_ahora() {
                     for evento in historial.registrar(&estado.dispositivos) {
                         match evento {
@@ -170,15 +166,27 @@ fn iniciar_vigia(app: AppHandle, historial: Arc<Historial>) {
                         }
                         huella_anterior = nueva;
                     }
+                    aparatos = Some((estado.bluetooth_encendido, lista));
                 }
+                // El menú del ícono: los aparatos ya leídos (sin volver a leer el Bluetooth). Solo se toca si cambió.
+                sistema::bandeja::al_vigilar(&app, aparatos);
                 std::thread::sleep(Duration::from_secs(20));
             }
-        })
-        .expect("no se pudo iniciar el vigía");
+        });
+    // Sin vigía, Nexo abre igual (sin historial automático ni aviso de batería baja).
+    if let Err(e) = vigia {
+        eprintln!("Nexo: no se pudo iniciar el vigía ({e})");
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Un pánico queda anotado en nexo-errores.log antes de cerrarse (sistema/fallos.rs).
+    sistema::fallos::instalar();
+    // Windows: si Nexo ya está abierto, esa copia muestra el panel y esta se cierra.
+    if !sistema::instancia::primera() {
+        return;
+    }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
@@ -253,19 +261,34 @@ pub fn run() {
             sistema::escenas::guardar_escena,
             sistema::escenas::borrar_escena,
             sistema::escenas::activar_escena,
+            sistema::actualizar::actualizacion_estado,
+            sistema::actualizar::actualizacion_buscar,
+            sistema::actualizar::actualizar_instalar,
             abrir_seccion,
         ])
         .setup(|app| {
+            // Windows, recién instalado: abrir al iniciar sesión queda activo (lo demás ya viene encendido).
+            sistema::primer_inicio::aplicar(app.handle());
+            // Windows: otra copia de Nexo que se abre pide mostrar el panel de esta.
+            let a = app.handle().clone();
+            sistema::instancia::escuchar(move || {
+                let b = a.clone();
+                let _ = a.run_on_main_thread(move || abrir_panel(&b, None));
+            });
             // Pantallas: al cambiar el brillo con las teclas se muestra el aviso en ese monitor.
             let manejador = app.handle().clone();
             let pantallas = Arc::new(Pantallas::iniciar(Box::new(move |id, nivel| {
-                sistema::aviso::mostrar(&manejador, id, nivel)
+                sistema::aviso::mostrar(&manejador, id, nivel);
+                // Y el "Brillo: 40 %" del menú del ícono (los toques seguidos se juntan).
+                sistema::bandeja::actualizar(&manejador);
             })));
             app.manage(pantallas.clone());
             // Remoto (Mac): vigía de la sesión de RustDesk, atajos de Windows, captura con F13 y portapapeles liviano.
             sistema::remoto::iniciar(app.handle());
             // Nexo Drop: el receptor escucha solo en la dirección de Tailscale (puerto 47821).
             sistema::drop::iniciar(app.handle());
+            // Windows: busca versiones nuevas en la Mac a los 20 s y cada 30 min.
+            sistema::actualizar::iniciar(app.handle());
             if sistema::ajustes::cargar(app.handle()).teclas_brillo && sistema::teclas::permiso_concedido() {
                 let _ = sistema::teclas::activar(pantallas, true);
             }
@@ -277,52 +300,19 @@ pub fn run() {
             // Botones de brillo de los widgets nativos de la Mac.
             sistema::widgets_mac::escuchar(app.handle().clone());
 
-            let abrir = MenuItem::with_id(app, "abrir", "Abrir Nexo", true, None::<&str>)?;
-            let widget = CheckMenuItem::with_id(
-                app,
-                "widget",
-                "Widget en el escritorio",
-                true,
-                sistema::widget::activo(app.handle()),
-                None::<&str>,
-            )?;
-            // Mi setup: las escenas a un clic desde el ícono (el submenú se rehace cuando cambian).
-            let escenas = sistema::escenas::submenu(app.handle())?;
-            let salir = MenuItem::with_id(app, "salir", "Salir de Nexo", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&abrir, &escenas, &widget, &salir])?;
-            app.manage(sistema::widget::CasillaBandeja(widget));
-
-            TrayIconBuilder::with_id("nexo")
-                .icon(Image::from_bytes(include_bytes!("../icons/bandeja.png"))?)
-                .icon_as_template(true)
-                .tooltip("Nexo")
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, evento| match evento.id.as_ref() {
-                    "abrir" => abrir_panel(app, None),
-                    "widget" => sistema::widget::alternar(app),
-                    "salir" => app.exit(0),
-                    id if id.starts_with("escena:") => sistema::escenas::desde_bandeja(app, id),
-                    _ => {}
-                })
-                .on_tray_icon_event(|icono, evento| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = evento
-                    {
-                        abrir_panel(icono.app_handle(), None);
-                    }
-                })
-                .build(app)?;
+            // El ícono y su menú de accesos rápidos (captura, escenas, sonido, brillo, aparatos, remoto).
+            // Si no se puede crear, Nexo sigue: el panel y el widget abren igual.
+            if let Err(e) = sistema::bandeja::crear(app.handle()) {
+                eprintln!("Nexo: no se pudo crear el ícono ({e})");
+            }
 
             abrir_panel(app.handle(), None);
             sistema::widget::iniciar(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("no se pudo iniciar Nexo");
+        // Sin abortar: queda anotado y, en Windows, se dice en un cuadro (por ejemplo, si falta WebView2).
+        .unwrap_or_else(|e| sistema::fallos::fatal(&e.to_string()));
 
     app.run(|app, evento| {
         #[cfg(not(target_os = "macos"))]

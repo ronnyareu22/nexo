@@ -35,7 +35,7 @@ nexo/
 │       ├── estilos/         Colores y letra (oscuro y claro)
 │       └── componentes/     Tarjeta, detalle, batería, ilustraciones, íconos
 └── src-tauri/               Parte nativa (Rust)
-    ├── src/lib.rs           Arranque, ícono de la barra y ventana
+    ├── src/lib.rs           Arranque y ventana
     ├── src/dispositivos/    Un módulo por familia de aparatos
     │   ├── mod.rs           Tipos y comandos comunes
     │   ├── bluetooth.rs     Mac: system_profiler e IOBluetooth
@@ -43,6 +43,7 @@ nexo/
     │   ├── historial.rs     Sesiones de uso, muestras de batería y ajustes automáticos (historial.json)
     │   └── pantallas.rs     Brillo: DisplayServices (MacBook) y DDC/CI (externos), en un hilo propio
     ├── src/sistema/         Integración con macOS
+    │   ├── bandeja.rs       Ícono de la barra y su menú de accesos rápidos
     │   ├── teclas.rs        Escucha las teclas de brillo (permiso de Accesibilidad)
     │   ├── aviso.rs         Ventanita del aviso de brillo (se libera tras 60 s sin uso)
     │   └── ajustes.rs       Ajustes guardados (ajustes.json)
@@ -79,6 +80,8 @@ pnpm tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles n
 ```
 
 El instalador queda en `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`. Para revisar sin compilar: `cargo xwin check --target x86_64-pc-windows-msvc`.
+
+**Publicar una versión para el PC:** `./scripts/publicar-windows.sh`. Compila con un sello nuevo (`NEXO_COMPILADO`), deja el instalador y su `info.json` en `~/Library/Application Support/com.ronny.nexo/actualizaciones/windows/` y lo copia a Google Drive › Nexo. El Nexo del PC lo encuentra solo por XDrop (a los 20 s de abrirse y cada 30 min), avisa "Nueva versión de Nexo lista" y con **Actualizar** lo baja, revisa su sha256, lo instala en silencio (`/S /UPDATE /R`) y se vuelve a abrir. Hace falta que la Mac tenga Nexo abierto con XDrop › Recibir encendido. El instalador (`src-tauri/windows/hooks.nsh`) además crea la regla del firewall de XDrop (solo Tailscale, un aviso de UAC; si se rechaza, sigue igual).
 
 ## Instalar en la Mac (firma estable)
 

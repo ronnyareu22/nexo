@@ -7,6 +7,7 @@
 //! - Cada conexión va en su propio hilo (16 a la vez como mucho) y se corta si pasa 30 s sin datos.
 //! - Rutas: `GET /nexo/hola`, `PUT /nexo/archivo?nombre=&tamano=&lote=&indice=&total=&desde=`,
 //!   `POST /nexo/texto` `{texto}` y `POST /nexo/enlace` `{url}`. Mi setup: `GET /nexo/aparatos` (ver sistema/setup.rs).
+//!   Actualizaciones: `GET /nexo/actualizacion?plataforma=windows` y `/nexo/actualizacion/archivo` (sistema/actualizar.rs).
 //! - Un archivo llega a un temporal oculto en Descargas › Nexo Drop y, completo, pasa a su nombre final
 //!   (con sus carpetas y "(2)" si ya existe). Si se corta, el temporal se borra.
 
@@ -404,7 +405,18 @@ fn atender(app: &AppHandle, mut s: TcpStream) {
                 let _ = responder(&mut s, 200, &crate::sistema::setup::aparatos_json(app));
                 Ok(())
             }
-            (_, "/nexo/hola" | "/nexo/archivo" | "/nexo/texto" | "/nexo/enlace" | "/nexo/aparatos") => {
+            // Actualizaciones para Windows (ver sistema/actualizar.rs).
+            ("GET", "/nexo/actualizacion") => {
+                crate::sistema::actualizar::servir_info(app, &mut s, &p.consulta).map_err(|(c, m)| Fallo(c, m))
+            }
+            ("GET", "/nexo/actualizacion/archivo") => {
+                crate::sistema::actualizar::servir_archivo(app, &mut s, &p.consulta).map_err(|(c, m)| Fallo(c, m))
+            }
+            (
+                _,
+                "/nexo/hola" | "/nexo/archivo" | "/nexo/texto" | "/nexo/enlace" | "/nexo/aparatos" | "/nexo/actualizacion"
+                | "/nexo/actualizacion/archivo",
+            ) => {
                 Err(fallo(405, "Método no permitido."))
             }
             _ => Err(fallo(404, "No existe.")),

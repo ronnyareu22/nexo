@@ -44,6 +44,7 @@
   import VistaAutomatizaciones from '$lib/vistas/Automatizaciones.svelte';
   import VistaAjustes from '$lib/vistas/Ajustes.svelte';
   import VistaBienvenida from '$lib/vistas/Bienvenida.svelte';
+  import AvisoActualizacion from '$lib/componentes/AvisoActualizacion.svelte';
 
   type Seccion =
     | 'inicio'
@@ -336,6 +337,9 @@
           <BotonTema />
         </div>
       </header>
+
+      <!-- Windows: una versión nueva de Nexo lista en tu Mac. -->
+      <AvisoActualizacion />
 
       <main>
         {#key seccion}

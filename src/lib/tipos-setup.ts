@@ -108,7 +108,8 @@ export interface MapaSetup {
 // --- Escenas ---
 
 export type Accion =
-  | { tipo: 'brillo'; pantalla: 'principal' | 'todas'; valor: number }
+  /** `pantalla`: la principal, todas o una por su nombre ("nombre:Steren 27\" IPS"). */
+  | { tipo: 'brillo'; pantalla: 'principal' | 'todas' | `nombre:${string}`; valor: number }
   | { tipo: 'conectar'; dispositivo: string; nombre?: string | null }
   | { tipo: 'desconectar'; dispositivo: string; nombre?: string | null }
   | { tipo: 'salida'; dispositivo: string; nombre?: string | null }

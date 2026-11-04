@@ -1,8 +1,10 @@
 <!--
   Remoto: la Mac desde el PC del trabajo, con RustDesk por Tailscale.
-  Arriba, el estado de la sesión (desde qué PC, directa o por el relé) con Tailscale y RustDesk, y las acciones.
-  Debajo: los atajos de Windows que Nexo traduce en la Mac, la captura con Imprimir Pantalla, la comodidad durante
-  la sesión y el portapapeles liviano con su historial.
+  Arriba, el estado de la sesión con su ilustración (el PC de la oficina, la Mac de la casa y Tailscale al medio:
+  conectada, lista o apagada), las acciones y los servicios en fichas.
+  Debajo, a lo ancho, los atajos de Windows que Nexo traduce en la Mac (con espacio, en dos columnas de filas).
+  Luego, en dos columnas parejas: la captura con Imprimir Pantalla y la comodidad durante la sesión, y el
+  portapapeles liviano con su historial.
   En Windows solo se conecta: la traducción, la captura y el portapapeles los hace Nexo en la Mac.
   Se relee al llegar "remoto-cambio" y cada 5 s mientras se ve; el historial, al llegar "portapapeles-cambio".
   Superficies sólidas, el hover solo cambia el color y ningún texto se corta: todo baja de línea.
@@ -40,6 +42,7 @@
   import Icono, { type Nombre } from '$lib/componentes/Icono.svelte';
   import Interruptor from '$lib/componentes/Interruptor.svelte';
   import Dialogo from '$lib/componentes/Dialogo.svelte';
+  import IlustracionEscena from '$lib/componentes/IlustracionEscena.svelte';
 
   let { onerror }: { onerror: (texto: string) => void } = $props();
 
@@ -99,7 +102,11 @@
     if (!esMac)
       return {
         titulo: 'Tu Mac, a un clic',
-        detalle: `Abre RustDesk conectado directo a tu Mac por Tailscale (${r.ipMac}).`,
+        detalle: !r.rustdesk
+          ? 'Instala RustDesk desde rustdesk.com y vuelve aquí: el botón se activa solo.'
+          : r.tailscale !== 'activo'
+            ? 'Enciende Tailscale en esta PC para llegar directo a tu Mac.'
+            : `Abre RustDesk conectado directo a tu Mac por Tailscale (${r.ipMac}).`,
         tono: r.rustdesk && r.tailscale === 'activo' ? 'ok' : 'apagado',
       };
     if (r.activa && r.rele)
@@ -132,6 +139,15 @@
     if (r.rele) return { estado: 'rele', via: 'Relé' };
     return { estado: 'viva', via: r.directa ? 'Tailscale' : 'Red' };
   });
+
+  // La ilustración de arriba: conectada (línea firme y visto), lista (línea punteada) o apagada (sin sesión).
+  const escenaRemoto = $derived(
+    ruta.estado === 'viva'
+      ? 'remoto-conectado'
+      : ruta.estado === 'rele' || resumen?.tono === 'ok' || remoto?.modoTrabajo
+        ? 'remoto'
+        : 'remoto-sin',
+  );
 
   const servicios = $derived.by((): { nombre: string; valor: string; tono: Tono }[] => {
     const r = remoto;
@@ -400,190 +416,128 @@
 
   {#if remoto && resumen}
     {@const r = remoto}
-    <!-- Estado de la sesión -->
+    <!-- Estado de la sesión: la ilustración a la izquierda; el estado, las acciones y los servicios a la derecha -->
     <section class="estado vidrio" aria-labelledby="remoto-estado">
-      <div class="ruta {ruta.estado}" aria-hidden="true">
-        <span class="nodo">
-          <span class="nodo__icono"><Icono nombre="pantallas" tamano={22} /></span>
-          <span class="nodo__nombre">PC</span>
-        </span>
-        <span class="tramo">
-          <span class="tramo__linea"></span>
-          {#if ruta.via}<span class="tramo__via">{ruta.via}</span>{/if}
-        </span>
-        <span class="nodo">
-          <span class="nodo__icono"><Icono nombre="portatil" tamano={22} /></span>
-          <span class="nodo__nombre">Mac</span>
-        </span>
+      <div class="estado__escena {ruta.estado}" aria-hidden="true">
+        <IlustracionEscena nombre={escenaRemoto} icono="remoto" />
+        {#if ruta.via}<span class="estado__via">{ruta.via}</span>{/if}
       </div>
 
-      <div class="estado__textos" role="status" aria-live="polite">
-        <h2 class="estado__titulo" id="remoto-estado">
-          <span class="punto {resumen.tono}" aria-hidden="true"></span>{resumen.titulo}
-        </h2>
-        <p class="estado__detalle">{resumen.detalle}</p>
-      </div>
+      <div class="estado__cuerpo">
+        <div class="estado__textos" role="status" aria-live="polite">
+          <h2 class="estado__titulo" id="remoto-estado">
+            <span class="punto {resumen.tono}" aria-hidden="true"></span>{resumen.titulo}
+          </h2>
+          <p class="estado__detalle">{resumen.detalle}</p>
+        </div>
 
-      <div class="estado__acciones">
+        <div class="estado__acciones">
+          {#if esMac}
+            <button
+              class={r.activa ? 'boton-vidrio boton' : 'boton-primario'}
+              type="button"
+              disabled={preparando}
+              aria-busy={preparando}
+              onclick={preparar}
+            >
+              {preparando ? 'Preparando…' : 'Preparar para el trabajo'}
+            </button>
+            <button class="boton-vidrio boton" type="button" onclick={abrirRD}>Abrir RustDesk</button>
+          {:else}
+            <button
+              class="boton-primario"
+              type="button"
+              disabled={conectando || !r.rustdesk}
+              aria-busy={conectando}
+              onclick={conectar}
+            >
+              <Icono nombre="conectar" tamano={17} />
+              Conectar a mi Mac
+            </button>
+            <button class="boton-vidrio boton" type="button" disabled={!r.rustdesk} onclick={abrirRD}>Abrir RustDesk</button>
+          {/if}
+        </div>
+
+        <ul class="servicios" aria-label="Servicios">
+          {#each servicios as s (s.nombre)}
+            <li class="servicio {s.tono}">
+              <span class="punto {s.tono}" aria-hidden="true"></span>
+              <span class="servicio__nombre">{s.nombre}</span>
+              <span class="servicio__valor">{s.valor}</span>
+            </li>
+          {/each}
+          <li class="servicio">
+            <span class="servicio__nombre">Tu Mac</span>
+            <span class="servicio__valor direccion">{r.ipMac}</span>
+          </li>
+        </ul>
+
+        {#if avisoAccion}
+          <p class="aviso-accion {avisoAccion.tono}" role="status">
+            <Icono nombre={avisoAccion.tono === 'ok' ? 'check-circulo' : 'info'} tamano={16} />
+            {avisoAccion.texto}
+          </p>
+        {/if}
+      </div>
+    </section>
+
+    <!-- Atajos: a lo ancho; con espacio, las filas van en dos columnas -->
+    <section class="panel vidrio panel-atajos" aria-labelledby="remoto-atajos">
+      <div class="cabeza">
+        {@render ficha('teclado', esMac && r.ajustes.traducir && r.permisoTeclas)}
+        <div class="textos">
+          <h2 class="titulo-panel" id="remoto-atajos">Atajos de Windows en tu Mac</h2>
+          <p class="ayuda">
+            {esMac
+              ? 'Usa los atajos de siempre desde el PC: Nexo los traduce solo en lo que llega por RustDesk. El teclado de tu Mac no cambia.'
+              : 'La traducción la hace Nexo en tu Mac: desde aquí, conéctate y usa los atajos de siempre.'}
+          </p>
+        </div>
         {#if esMac}
-          <button
-            class={r.activa ? 'boton-vidrio boton' : 'boton-primario'}
-            type="button"
-            disabled={preparando}
-            aria-busy={preparando}
-            onclick={preparar}
-          >
-            {preparando ? 'Preparando…' : 'Preparar para el trabajo'}
-          </button>
-          <button class="boton-vidrio boton" type="button" onclick={abrirRD}>Abrir RustDesk</button>
-        {:else}
-          <button
-            class="boton-primario"
-            type="button"
-            disabled={conectando || !r.rustdesk}
-            aria-busy={conectando}
-            onclick={conectar}
-          >
-            <Icono nombre="conectar" tamano={17} />
-            Conectar a mi Mac
-          </button>
-          <button class="boton-vidrio boton" type="button" disabled={!r.rustdesk} onclick={abrirRD}>Abrir RustDesk</button>
+          <Interruptor
+            encendido={r.ajustes.traducir}
+            cargando={ocupado === 'traducir'}
+            etiqueta="Traducir atajos"
+            oncambio={() => ajustar('traducir', !r.ajustes.traducir)}
+          />
         {/if}
       </div>
 
-      <ul class="servicios">
-        {#each servicios as s (s.nombre)}
-          <li class="servicio">
-            <span class="servicio__nombre">{s.nombre}</span>
-            <span class="servicio__valor {s.tono}"><span class="punto {s.tono}" aria-hidden="true"></span>{s.valor}</span>
-          </li>
-        {/each}
-        <li class="servicio">
-          <span class="servicio__nombre">Dirección de tu Mac</span>
-          <span class="servicio__valor direccion">{r.ipMac}</span>
-        </li>
-      </ul>
+      {#if esMac && !r.permisoTeclas}
+        <div class="permiso">
+          <Icono nombre="alerta" tamano={16} />
+          <p>Falta el permiso de <b>Accesibilidad</b>: sin él, Nexo no puede traducir ni escuchar Imprimir Pantalla.</p>
+          <button class="boton-vidrio boton" type="button" onclick={abrirAccesibilidad}>Abrir Accesibilidad</button>
+        </div>
+      {/if}
 
-      {#if avisoAccion}
-        <p class="aviso-accion {avisoAccion.tono}" role="status">
-          <Icono nombre={avisoAccion.tono === 'ok' ? 'check-circulo' : 'info'} tamano={16} />
-          {avisoAccion.texto}
-        </p>
+      <div class="grupos" class:apagado={esMac && !r.ajustes.traducir}>
+        {#each grupos as g (g.nombre)}
+          <div class="grupo">
+            <h3 class="rotulo">{g.nombre}</h3>
+            <ul class="lista-atajos">
+              {#each g.atajos as a (a.windows.join('+') + a.accion)}
+                <li class="atajo">
+                  {@render teclas(a.windows, 'windows')}
+                  <span class="flecha" aria-hidden="true"><Icono nombre="flecha" tamano={13} /></span>
+                  {@render teclas(a.mac, 'mac')}
+                  <span class="accion">{a.accion}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {/each}
+      </div>
+      {#if totalAtajos > 9}
+        <button class="mas-atajos" type="button" aria-expanded={todos} onclick={() => (todos = !todos)}>
+          {todos ? 'Ver menos' : `Ver los ${totalAtajos} atajos`}
+          <span class="giro" class:abierto={todos}><Icono nombre="chevron-abajo" tamano={15} /></span>
+        </button>
       {/if}
     </section>
 
-    <div class="columnas">
-      <div class="columna">
-        <!-- Atajos -->
-        <section class="panel vidrio" aria-labelledby="remoto-atajos">
-          <div class="cabeza">
-            {@render ficha('teclado', esMac && r.ajustes.traducir && r.permisoTeclas)}
-            <div class="textos">
-              <h2 class="titulo-panel" id="remoto-atajos">Atajos de Windows en tu Mac</h2>
-              <p class="ayuda">
-                {esMac
-                  ? 'Usa los atajos de siempre desde el PC: Nexo los traduce solo en lo que llega por RustDesk. El teclado de tu Mac no cambia.'
-                  : 'La traducción la hace Nexo en tu Mac: desde aquí, conéctate y usa los atajos de siempre.'}
-              </p>
-            </div>
-            {#if esMac}
-              <Interruptor
-                encendido={r.ajustes.traducir}
-                cargando={ocupado === 'traducir'}
-                etiqueta="Traducir atajos"
-                oncambio={() => ajustar('traducir', !r.ajustes.traducir)}
-              />
-            {/if}
-          </div>
-
-          {#if esMac && !r.permisoTeclas}
-            <div class="permiso">
-              <Icono nombre="alerta" tamano={16} />
-              <p>Falta el permiso de <b>Accesibilidad</b>: sin él, Nexo no puede traducir ni escuchar Imprimir Pantalla.</p>
-              <button class="boton-vidrio boton" type="button" onclick={abrirAccesibilidad}>Abrir Accesibilidad</button>
-            </div>
-          {/if}
-
-          <div class="grupos" class:apagado={esMac && !r.ajustes.traducir}>
-            {#each grupos as g (g.nombre)}
-              <div class="grupo">
-                <h3 class="rotulo">{g.nombre}</h3>
-                <ul class="lista-atajos">
-                  {#each g.atajos as a (a.windows.join('+') + a.accion)}
-                    <li class="atajo">
-                      {@render teclas(a.windows, 'windows')}
-                      <span class="flecha" aria-hidden="true"><Icono nombre="flecha" tamano={14} /></span>
-                      {@render teclas(a.mac, 'mac')}
-                      <span class="accion">{a.accion}</span>
-                    </li>
-                  {/each}
-                </ul>
-              </div>
-            {/each}
-          </div>
-          {#if totalAtajos > 9}
-            <button class="mas-atajos" type="button" aria-expanded={todos} onclick={() => (todos = !todos)}>
-              {todos ? 'Ver menos' : `Ver los ${totalAtajos} atajos`}
-              <span class="giro" class:abierto={todos}><Icono nombre="chevron-abajo" tamano={15} /></span>
-            </button>
-          {/if}
-        </section>
-
-        {#if esMac}
-          <!-- Comodidad durante la sesión -->
-          <section class="panel vidrio" aria-labelledby="remoto-sesion">
-            <h2 class="rotulo" id="remoto-sesion">Durante la sesión</h2>
-            <div class="fila">
-              {@render ficha('luna', r.ajustes.evitarReposo)}
-              <div class="textos">
-                <div class="titulo">Evitar que la Mac se duerma</div>
-                <div class="ayuda">Mientras estés conectado, con el cargador puesto. Al terminar, todo vuelve a lo normal.</div>
-              </div>
-              <Interruptor
-                encendido={r.ajustes.evitarReposo}
-                cargando={ocupado === 'evitarReposo'}
-                etiqueta="Evitar que la Mac se duerma"
-                oncambio={() => ajustar('evitarReposo', !r.ajustes.evitarReposo)}
-              />
-            </div>
-            <div class="fila">
-              {@render ficha('sol-bajo', r.ajustes.brilloMinimo)}
-              <div class="textos">
-                <div class="titulo">Bajar el brillo al mínimo</div>
-                <div class="ayuda">La pantalla de la MacBook baja a 0 y vuelve a como estaba al terminar.</div>
-              </div>
-              <Interruptor
-                encendido={r.ajustes.brilloMinimo}
-                cargando={ocupado === 'brilloMinimo'}
-                etiqueta="Bajar el brillo al mínimo"
-                oncambio={() => ajustar('brilloMinimo', !r.ajustes.brilloMinimo)}
-              />
-            </div>
-            {#if r.modoTrabajo}
-              <div class="fila">
-                {@render ficha('encendido', true)}
-                <div class="textos">
-                  <div class="titulo">Modo trabajo</div>
-                  <div class="ayuda">
-                    {r.ajustes.evitarReposo
-                      ? 'La Mac no se dormirá aunque todavía no te hayas conectado.'
-                      : 'Activo, pero «Evitar que la Mac se duerma» está apagado.'}
-                  </div>
-                </div>
-                <button
-                  class="boton-vidrio boton"
-                  type="button"
-                  disabled={ocupado === 'modoTrabajo'}
-                  onclick={() => ajustar('modoTrabajo', false)}
-                >
-                  Terminar
-                </button>
-              </div>
-            {/if}
-          </section>
-        {/if}
-      </div>
-
+    <!-- Los demás paneles en dos columnas parejas: captura y la sesión a la izquierda, el portapapeles a la derecha -->
+    <div class="paneles">
       <div class="columna">
         <!-- Captura -->
         <section class="panel vidrio" aria-labelledby="remoto-captura">
@@ -671,8 +625,62 @@
             {/if}
           {/if}
         </section>
-
         {#if esMac}
+          <!-- Comodidad durante la sesión -->
+          <section class="panel vidrio" aria-labelledby="remoto-sesion">
+            <h2 class="rotulo" id="remoto-sesion">Durante la sesión</h2>
+            <div class="fila">
+              {@render ficha('luna', r.ajustes.evitarReposo)}
+              <div class="textos">
+                <div class="titulo">Evitar que la Mac se duerma</div>
+                <div class="ayuda">Mientras estés conectado, con el cargador puesto. Al terminar, todo vuelve a lo normal.</div>
+              </div>
+              <Interruptor
+                encendido={r.ajustes.evitarReposo}
+                cargando={ocupado === 'evitarReposo'}
+                etiqueta="Evitar que la Mac se duerma"
+                oncambio={() => ajustar('evitarReposo', !r.ajustes.evitarReposo)}
+              />
+            </div>
+            <div class="fila">
+              {@render ficha('sol-bajo', r.ajustes.brilloMinimo)}
+              <div class="textos">
+                <div class="titulo">Bajar el brillo al mínimo</div>
+                <div class="ayuda">La pantalla de la MacBook baja a 0 y vuelve a como estaba al terminar.</div>
+              </div>
+              <Interruptor
+                encendido={r.ajustes.brilloMinimo}
+                cargando={ocupado === 'brilloMinimo'}
+                etiqueta="Bajar el brillo al mínimo"
+                oncambio={() => ajustar('brilloMinimo', !r.ajustes.brilloMinimo)}
+              />
+            </div>
+            {#if r.modoTrabajo}
+              <div class="fila">
+                {@render ficha('encendido', true)}
+                <div class="textos">
+                  <div class="titulo">Modo trabajo</div>
+                  <div class="ayuda">
+                    {r.ajustes.evitarReposo
+                      ? 'La Mac no se dormirá aunque todavía no te hayas conectado.'
+                      : 'Activo, pero «Evitar que la Mac se duerma» está apagado.'}
+                  </div>
+                </div>
+                <button
+                  class="boton-vidrio boton"
+                  type="button"
+                  disabled={ocupado === 'modoTrabajo'}
+                  onclick={() => ajustar('modoTrabajo', false)}
+                >
+                  Terminar
+                </button>
+              </div>
+            {/if}
+          </section>
+        {/if}
+      </div>
+      {#if esMac}
+        <div class="columna">
           <!-- Portapapeles -->
           <section class="panel vidrio" aria-labelledby="remoto-portapapeles">
             <div class="cabeza">
@@ -756,16 +764,13 @@
               </ul>
             {/if}
           </section>
-        {/if}
-      </div>
+        </div>
+      {/if}
     </div>
   {:else}
     <!-- Mientras responde Rust: siluetas quietas del estado y de los paneles. -->
     <div class="silueta-estado vidrio" aria-busy="true"><span class="solo-lector">Revisando el remoto…</span></div>
-    <div class="columnas">
-      <div class="silueta-panel vidrio"></div>
-      <div class="silueta-panel vidrio"></div>
-    </div>
+    <div class="silueta-panel vidrio"></div>
   {/if}
 </div>
 
@@ -802,88 +807,56 @@
   }
 
   /* ---------- Estado ---------- */
+  /* La ilustración a la izquierda, en un escenario apenas teñido; el estado y las acciones a la derecha. */
   .estado {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
     align-items: center;
-    gap: 20px 28px;
-    padding: 22px 24px 18px;
+    gap: 16px 24px;
+    padding: 12px 22px 12px 12px;
     border-radius: var(--radio-lg);
   }
-
-  /* El camino PC → Mac: dos fichas y una línea quieta. Verde si hay sesión directa, ámbar por el relé. */
-  .ruta {
-    --color-ruta: var(--borde-fuerte);
-    display: flex;
-    align-items: flex-start;
-  }
-  .ruta.viva {
-    --color-ruta: var(--exito);
-  }
-  .ruta.rele {
-    --color-ruta: var(--aviso);
-  }
-  .nodo {
-    display: grid;
-    justify-items: center;
-    gap: 6px;
-  }
-  .nodo__icono {
-    display: grid;
-    place-items: center;
-    width: 52px;
-    height: 52px;
-    border-radius: var(--radio-md);
-    background: var(--superficie-elevada);
-    box-shadow: inset 0 0 0 1px var(--borde);
-    color: var(--texto-3);
-    transition:
-      background-color var(--dur-color) ease,
-      color var(--dur-color) ease;
-  }
-  .viva .nodo__icono,
-  .rele .nodo__icono {
-    color: var(--color-ruta);
-    background: color-mix(in srgb, var(--color-ruta) 12%, var(--superficie));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ruta) 30%, transparent);
-  }
-  .nodo__nombre {
-    font-size: 11px;
-    line-height: 16px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--texto-3);
-  }
-  .tramo {
+  .estado__escena {
     position: relative;
-    display: grid;
-    place-items: center;
-    width: 76px;
-    height: 52px;
+    height: 196px;
+    padding: 8px 6px 0;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--primario) 6%, var(--superficie-inserto));
+    overflow: hidden;
   }
-  .tramo__linea {
+  .estado__escena.viva {
+    background: color-mix(in srgb, var(--exito) 8%, var(--superficie-inserto));
+  }
+  .estado__escena.apagada {
+    background: var(--superficie-inserto);
+  }
+  /* Por dónde va la sesión, al pie del dibujo: verde si es directa, ámbar por el relé. */
+  .estado__via {
     position: absolute;
-    left: 6px;
-    right: 6px;
-    top: 50%;
-    border-top: 2px dashed var(--color-ruta);
-  }
-  .viva .tramo__linea {
-    border-top-style: solid;
-  }
-  .tramo__via {
-    position: relative;
-    padding: 1px 8px;
+    left: 50%;
+    bottom: 10px;
+    transform: translateX(-50%);
+    padding: 1px 10px;
     border-radius: var(--radio-pildora);
     background: var(--superficie);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ruta) 45%, transparent);
-    color: var(--color-ruta);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--exito) 45%, transparent);
+    color: var(--exito);
     font-size: 11px;
     line-height: 18px;
     font-weight: 600;
+    white-space: nowrap;
+  }
+  .rele .estado__via {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aviso) 45%, transparent);
+    color: var(--aviso);
   }
 
+  .estado__cuerpo {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+    padding: 8px 0;
+  }
   .estado__titulo {
     display: flex;
     align-items: center;
@@ -915,46 +888,45 @@
   .estado__acciones {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
     gap: 10px;
   }
 
+  /* Los servicios como fichas chicas y parejas. */
   .servicios {
-    grid-column: 1 / -1;
     display: flex;
     flex-wrap: wrap;
-    gap: 10px 28px;
+    gap: 6px;
     margin: 0;
-    padding: 14px 0 0;
-    border-top: 1px solid var(--borde);
+    padding: 0;
     list-style: none;
   }
   .servicio {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 3px 11px 3px 10px;
+    border-radius: var(--radio-pildora);
+    background: var(--superficie-inserto);
+    box-shadow: inset 0 0 0 1px var(--borde);
     font-size: 12.5px;
     line-height: 18px;
+  }
+  .servicio .punto {
+    width: 6px;
+    height: 6px;
   }
   .servicio__nombre {
     color: var(--texto-3);
   }
   .servicio__valor {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
     font-weight: 600;
     color: var(--texto-2);
   }
-  .servicio__valor .punto {
-    width: 6px;
-    height: 6px;
-    align-self: center;
-  }
-  .servicio__valor.ok {
+  .servicio.ok .servicio__valor {
     color: var(--exito);
   }
-  .servicio__valor.aviso {
+  .servicio.aviso .servicio__valor {
     color: var(--aviso);
   }
   .direccion {
@@ -966,7 +938,6 @@
   }
 
   .aviso-accion {
-    grid-column: 1 / -1;
     display: flex;
     align-items: flex-start;
     gap: 8px;
@@ -989,34 +960,32 @@
     color: var(--aviso);
   }
 
-  /* Con poco ancho, las acciones bajan bajo el estado. */
-  @container (max-width: 860px) {
-    .estado {
-      grid-template-columns: auto minmax(0, 1fr);
-    }
-    .estado__acciones {
-      grid-column: 1 / -1;
-      justify-content: flex-start;
-    }
-  }
-  @container (max-width: 560px) {
+  /* Angosto: la ilustración arriba, a lo ancho, y el estado debajo. */
+  @container (max-width: 640px) {
     .estado {
       grid-template-columns: minmax(0, 1fr);
+      padding: 12px 12px 14px;
+    }
+    .estado__escena {
+      height: 172px;
+    }
+    .estado__cuerpo {
+      padding: 0 8px;
     }
   }
 
-  /* ---------- Columnas ---------- */
-  .columnas,
+  /* ---------- Paneles de abajo ---------- */
+  .paneles,
   .columna {
     display: grid;
     gap: 16px;
     align-content: start;
     min-width: 0;
   }
-  /* Con la ventana ancha, dos columnas para no dejar espacio muerto. */
-  @container (min-width: 1040px) {
-    .columnas {
-      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  /* Con espacio, dos columnas parejas (si hay portapapeles: en Windows queda solo la captura). */
+  @container (min-width: 900px) {
+    .paneles:has(> .columna + .columna) {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     }
   }
 
@@ -1199,10 +1168,21 @@
     color: var(--texto-3);
   }
 
+  /* Una tabla pareja para todos los grupos: cada fila es [teclas de Windows] → [teclas de la Mac] y la acción
+     justo después. Las columnas miden lo que pide la combinación más larga (subgrid en cada nivel), sin huecos
+     fijos, y quedan alineadas de un grupo a otro. */
   .grupos {
     display: grid;
-    gap: 14px;
-    padding: 4px 0 8px;
+    grid-template-columns: max-content 14px max-content minmax(0, 1fr);
+    column-gap: 10px;
+    row-gap: 14px;
+    padding: 2px 0 8px;
+  }
+  .grupo,
+  .lista-atajos {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
   }
   /* Con la traducción apagada, la tabla queda de referencia: el lado de la Mac pierde el color. */
   .grupos.apagado .mac kbd {
@@ -1212,6 +1192,10 @@
       inset 0 0 0 1px var(--borde),
       inset 0 -1.5px 0 var(--borde);
   }
+  .grupo .rotulo {
+    grid-column: 1 / -1;
+    margin: 0 0 2px;
+  }
   .lista-atajos {
     margin: 0;
     padding: 0;
@@ -1219,24 +1203,43 @@
   }
   .atajo {
     display: grid;
-    grid-template-columns: 9rem 18px 6.5rem minmax(0, 1fr);
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
     align-items: center;
-    gap: 10px;
-    padding: 7px 0;
-  }
-  .atajo + .atajo {
+    padding: 6px 0;
     border-top: 1px solid var(--borde);
+  }
+  .atajo:first-child {
+    border-top: 0;
   }
   .accion {
     font-size: 13px;
     line-height: 18px;
     color: var(--texto);
+    overflow-wrap: break-word;
+  }
+  /* Ancho: dos columnas de filas por grupo, con un respiro entre las dos mitades. */
+  @container (min-width: 900px) {
+    .grupos {
+      grid-template-columns:
+        max-content 14px max-content minmax(0, 1fr)
+        28px
+        max-content 14px max-content minmax(0, 1fr);
+    }
+    .atajo:nth-child(odd) {
+      grid-column: 1 / 5;
+    }
+    .atajo:nth-child(even) {
+      grid-column: 6 / 10;
+    }
+    .atajo:nth-child(2) {
+      border-top: 0;
+    }
   }
   /* Muy angosto: la acción baja debajo de las teclas. */
   @container (max-width: 520px) {
-    .atajo {
-      grid-template-columns: auto 18px auto;
-      justify-content: start;
+    .grupos {
+      grid-template-columns: max-content 14px max-content;
     }
     .accion {
       grid-column: 1 / -1;
@@ -1404,7 +1407,7 @@
 
   /* ---------- Siluetas mientras carga (quietas) ---------- */
   .silueta-estado {
-    height: 172px;
+    height: 220px;
     border-radius: var(--radio-lg);
   }
   .silueta-panel {

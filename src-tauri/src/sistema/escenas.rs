@@ -8,7 +8,7 @@
 //! - La bandeja tiene un submenú "Escenas" que se rehace cuando cambian.
 
 use crate::dispositivos;
-use crate::dispositivos::pantallas::Pantallas;
+use crate::dispositivos::pantallas::{Pantalla, Pantallas};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
@@ -33,7 +33,7 @@ const ICONOS: &[&str] = &[
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "tipo", rename_all = "camelCase")]
 pub enum Accion {
-    /// `pantalla`: "principal" o "todas".
+    /// `pantalla`: "principal", "todas" o una por su nombre ("nombre:<pantalla>").
     Brillo { pantalla: String, valor: u8 },
     /// `dispositivo`: la dirección Bluetooth. `nombre` es solo para mostrarlo.
     Conectar {
@@ -182,6 +182,20 @@ fn nuevo_id() -> String {
     format!("e{ms}")
 }
 
+/// Una pantalla por su nombre: "nombre:Steren 27\" IPS".
+const POR_NOMBRE: &str = "nombre:";
+
+/// "principal", "todas" o una pantalla por su nombre (limpio). Lo demás pasa a "todas".
+fn limpiar_pantalla(p: &str) -> String {
+    if p == "principal" {
+        return p.into();
+    }
+    match p.strip_prefix(POR_NOMBRE).map(|n| limpiar_texto(n, 80)) {
+        Some(n) if !n.is_empty() => format!("{POR_NOMBRE}{n}"),
+        _ => "todas".into(),
+    }
+}
+
 fn limpiar_aparato(dispositivo: &str, nombre: Option<String>) -> Result<(String, Option<String>), String> {
     let d = limpiar_texto(dispositivo, 200);
     if d.is_empty() {
@@ -192,10 +206,7 @@ fn limpiar_aparato(dispositivo: &str, nombre: Option<String>) -> Result<(String,
 
 fn limpiar_accion(a: Accion) -> Result<Option<Accion>, String> {
     Ok(Some(match a {
-        Accion::Brillo { pantalla, valor } => Accion::Brillo {
-            pantalla: if pantalla == "principal" { pantalla } else { "todas".into() },
-            valor: valor.min(100),
-        },
+        Accion::Brillo { pantalla, valor } => Accion::Brillo { pantalla: limpiar_pantalla(&pantalla), valor: valor.min(100) },
         Accion::Conectar { dispositivo, nombre } => {
             let (dispositivo, nombre) = limpiar_aparato(&dispositivo, nombre)?;
             Accion::Conectar { dispositivo, nombre }
@@ -379,16 +390,22 @@ async fn dormir(d: Duration) {
 
 // ---------------------------------------------------------------- Ejecutar
 
-/// El brillo de la pantalla principal o de todas las que lo dejan cambiar.
+/// El brillo de la pantalla principal, de una por su nombre o de todas las que lo dejan cambiar.
 fn brillo(app: &AppHandle, cual: &str, valor: u8) -> Result<(), String> {
     let p = app.try_state::<Arc<Pantallas>>().ok_or("Las pantallas todavía no están listas.")?;
     let lista = p.listar();
-    let elegidas: Vec<_> = lista.iter().filter(|x| x.controlable && (cual != "principal" || x.principal)).collect();
+    let por_nombre = cual.strip_prefix(POR_NOMBRE);
+    let es_ella = |x: &&Pantalla| match por_nombre {
+        Some(n) => limpiar_texto(&x.nombre, 80) == n,
+        None => cual != "principal" || x.principal,
+    };
+    let elegidas: Vec<_> = lista.iter().filter(|x| x.controlable && es_ella(x)).collect();
     if elegidas.is_empty() {
-        return Err(if cual == "principal" {
-            "La pantalla principal no deja cambiar el brillo.".into()
-        } else {
-            "Ninguna pantalla deja cambiar el brillo.".into()
+        return Err(match por_nombre {
+            Some(n) if lista.iter().any(|x| es_ella(&x)) => format!("{n} no deja cambiar el brillo."),
+            Some(n) => format!("{n} no está conectada a este equipo."),
+            None if cual == "principal" => "La pantalla principal no deja cambiar el brillo.".into(),
+            None => "Ninguna pantalla deja cambiar el brillo.".into(),
         });
     }
     let fallas: Vec<String> = elegidas
@@ -767,6 +784,14 @@ mod pruebas {
         assert!(es_sony("WH-CH520", None));
         assert!(es_sony("Audífonos", Some("0x054C")));
         assert!(!es_sony("Ronny Beats Solo³", Some("0x004C")));
+    }
+
+    #[test]
+    fn brillo_de_una_pantalla_por_su_nombre() {
+        assert_eq!(limpiar_pantalla("nombre:  Steren\u{7}  27 "), "nombre:Steren 27");
+        assert_eq!(limpiar_pantalla("nombre: "), "todas");
+        assert_eq!(limpiar_pantalla("principal"), "principal");
+        assert_eq!(limpiar_pantalla("otra"), "todas");
     }
 
     #[test]

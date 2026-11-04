@@ -19,6 +19,7 @@
   import SelectorTema from '$lib/componentes/SelectorTema.svelte';
   import NexoBot from '$lib/componentes/NexoBot.svelte';
   import Dialogo from '$lib/componentes/Dialogo.svelte';
+  import FilaActualizacion from '$lib/componentes/FilaActualizacion.svelte';
 
   let {
     nombre = '',
@@ -342,6 +343,8 @@
             <div class="ayuda">Tu centro de control de dispositivos.</div>
           </div>
         </div>
+        <!-- Cuándo se compiló y, en Windows, buscar una versión nueva en tu Mac. -->
+        <FilaActualizacion {onerror} />
       </section>
     </div>
   </div>

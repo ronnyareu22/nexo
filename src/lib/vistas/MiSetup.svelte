@@ -77,6 +77,7 @@
   import Ilustracion from '$lib/componentes/Ilustracion.svelte';
   import Escritorio from '$lib/componentes/Escritorio.svelte';
   import EditorEscena from '$lib/componentes/EditorEscena.svelte';
+  import IlustracionEscena, { ilustracionDe } from '$lib/componentes/IlustracionEscena.svelte';
 
   let {
     estado,
@@ -479,6 +480,41 @@
     }
   }
 
+  // ---------------------------------------------------------------- Fila de escenas
+  // Una sola fila: si sobra ancho, las tarjetas se estiran; si no, la fila se desliza (con imán por tarjeta)
+  // y aparecen las flechas. Sin barra de desplazamiento, así la fila no salta de alto.
+
+  let tira = $state<HTMLDivElement | null>(null);
+  let tiraDesborda = $state(false);
+  let tiraAtras = $state(false);
+  let tiraAdelante = $state(false);
+
+  function medirTira() {
+    if (!tira) return;
+    const { scrollLeft, scrollWidth, clientWidth } = tira;
+    tiraDesborda = scrollWidth > clientWidth + 1;
+    tiraAtras = scrollLeft > 2;
+    tiraAdelante = scrollLeft + clientWidth < scrollWidth - 2;
+  }
+
+  function moverTira(sentido: 1 | -1) {
+    if (!tira) return;
+    const paso = (tira.firstElementChild as HTMLElement | null)?.offsetWidth ?? 240;
+    const quieto = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    tira.scrollBy({ left: sentido * (paso + 12), behavior: quieto ? 'auto' : 'smooth' });
+  }
+
+  // Se vuelve a medir al cambiar el ancho o la cantidad de escenas.
+  $effect(() => {
+    const el = tira;
+    if (!el) return;
+    void escenas?.escenas.length;
+    const obs = new ResizeObserver(medirTira);
+    obs.observe(el);
+    medirTira();
+    return () => obs.disconnect();
+  });
+
   // ---------------------------------------------------------------- Ciclo
 
   onMount(() => {
@@ -490,7 +526,11 @@
         onerror(String(e));
       });
     leerEscenas()
-      .then((x) => (escenas = x))
+      .then((x) => {
+        escenas = x;
+        // Para revisar el editor fuera de la app (api-setup.ts).
+        if ((pruebaSetup === 'escena' || pruebaSetup === 'aparatos') && x.escenas[0]) editor = { escena: x.escenas[0] };
+      })
       .catch((e) => onerror(String(e)));
 
     // Cada 15 s solo con la ventana a la vista; al volver a ella, enseguida.
@@ -627,14 +667,41 @@
 
   <!-- ---------- Escenas ---------- -->
   <section class="escenas" aria-labelledby="setup-escenas">
-    <h2 class="rotulo" id="setup-escenas">Escenas</h2>
+    <div class="escenas__cabeza">
+      <h2 class="rotulo" id="setup-escenas">Escenas</h2>
+      <!-- Si no caben todas, la fila se desliza: estas flechas la mueven de a una tarjeta. -->
+      {#if tiraDesborda}
+        <div class="escenas__flechas">
+          <button
+            type="button"
+            class="flecha-tira"
+            aria-label="Escenas anteriores"
+            use:tooltip={'Anteriores'}
+            disabled={!tiraAtras}
+            onclick={() => moverTira(-1)}
+          >
+            <Icono nombre="atras" tamano={16} />
+          </button>
+          <button
+            type="button"
+            class="flecha-tira"
+            aria-label="Más escenas"
+            use:tooltip={'Más escenas'}
+            disabled={!tiraAdelante}
+            onclick={() => moverTira(1)}
+          >
+            <Icono nombre="chevron" tamano={16} />
+          </button>
+        </div>
+      {/if}
+    </div>
     {#if escenas}
-      <div class="tarjetas">
+      <div class="tarjetas" bind:this={tira} onscroll={medirTira}>
         {#each escenas.escenas as e (e.id)}
           {@const activa = escenas.ultima?.id === e.id}
           {@const enCurso = corriendo?.id === e.id ? corriendo : null}
           {@const resultado = fin?.id === e.id ? fin : null}
-          <article class="tarjeta vidrio" class:activa class:ocupada={!!corriendo && !enCurso}>
+          <article class="tarjeta vidrio" class:activa class:corriendo={!!enCurso} class:ocupada={!!corriendo && !enCurso}>
             <button
               type="button"
               class="tarjeta__toque"
@@ -642,7 +709,15 @@
               aria-describedby="escena-{e.id}-estado"
               onclick={() => activar(e)}
             >
-              <span class="ficha-icono tarjeta__ficha"><Icono nombre={iconoEscena(e.icono)} tamano={20} /></span>
+              <span class="tarjeta__escenario">
+                <IlustracionEscena nombre={ilustracionDe(e.icono)} icono={iconoEscena(e.icono)} />
+                {#if enCurso}
+                  <!-- Avance calmo: crece paso a paso, sin moverse en bucle. -->
+                  <span class="tarjeta__avance" aria-hidden="true">
+                    <span style:transform="scaleX({(enCurso.indice + 1) / Math.max(1, enCurso.total)})"></span>
+                  </span>
+                {/if}
+              </span>
               <span class="tarjeta__nombre">{e.nombre}</span>
               <span class="tarjeta__resumen">{resumen(e, nombrePor)}</span>
               <span class="tarjeta__estado" id="escena-{e.id}-estado" role="status" aria-live="polite">
@@ -655,8 +730,11 @@
                 {:else if resultado}
                   <Icono nombre="alerta" tamano={16} />
                   <span>Listo, salvo {plural(fallas(resultado.resultados).length, 'paso', 'pasos')}</span>
-                {:else if activa}
-                  <span>Última que activaste</span>
+                {:else if activa && escenas.ultima}
+                  <span class="punto-activa" aria-hidden="true"></span>
+                  <span>Última que activaste · {cuando(escenas.ultima.momento)}</span>
+                {:else}
+                  <span class="tenue">{plural(e.acciones.length, 'paso', 'pasos')} · toca para activarla</span>
                 {/if}
               </span>
             </button>
@@ -674,19 +752,19 @@
               use:tooltip={'Editar'}
               onclick={() => (editor = { escena: e })}
             >
-              <Icono nombre="editar" tamano={16} />
+              <Icono nombre="editar" tamano={15} />
             </button>
           </article>
         {/each}
         <button type="button" class="tarjeta nueva vidrio" onclick={() => (editor = { escena: null })}>
-          <span class="ficha-icono tenue tarjeta__ficha"><Icono nombre="mas" tamano={20} /></span>
+          <span class="tarjeta__escenario"><IlustracionEscena nombre="nueva" icono="mas" /></span>
           <span class="tarjeta__nombre">Nueva escena</span>
-          <span class="tarjeta__resumen">Junta brillo, sonido y apps en un solo toque.</span>
+          <span class="tarjeta__resumen">Junta aparatos, brillo, sonido y apps en un solo toque.</span>
         </button>
       </div>
     {:else}
       <div class="tarjetas" aria-busy="true" aria-label="Cargando escenas">
-        {#each [0, 1, 2, 3] as i (i)}<div class="tarjeta cargando vidrio"></div>{/each}
+        {#each [0, 1, 2, 3] as i (i)}<div class="tarjeta cargando vidrio"><span class="tarjeta__escenario"></span></div>{/each}
       </div>
     {/if}
   </section>
@@ -913,6 +991,9 @@
   abierto={!!editor}
   escena={editor?.escena ?? null}
   aparatos={local?.dispositivos ?? []}
+  pantallas={local?.pantallas ?? []}
+  equipo={local?.equipo ?? ''}
+  {remotos}
   mac={(local?.plataforma ?? 'mac') === 'mac'}
   onguardar={guardar}
   onborrar={borrar}
@@ -943,47 +1024,96 @@
   .escenas {
     display: grid;
     gap: 10px;
+    min-width: 0;
+  }
+  .escenas__cabeza {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 28px;
   }
   .escenas h2 {
     margin: 0;
   }
-  /* Escenas compactas: ícono a la izquierda, nombre y resumen al lado. Así el mapa queda a la vista. */
-  .tarjetas {
+  .escenas__flechas {
+    display: flex;
+    gap: 4px;
+  }
+  .flecha-tira {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-    gap: 10px;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--superficie-elevada);
+    box-shadow: inset 0 0 0 1px var(--borde);
+    color: var(--texto-2);
+    transition:
+      background-color var(--dur-color) ease,
+      color var(--dur-color) ease;
+  }
+  .flecha-tira:hover:not(:disabled) {
+    background: var(--superficie-hover);
+    color: var(--texto);
+  }
+  .flecha-tira:disabled {
+    color: var(--texto-3);
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  /* Una fila pareja: las tarjetas se estiran si sobra ancho y se deslizan (con imán) si falta.
+     El relleno deja ver el canto, la sombra y el foco de cada tarjeta; la barra no se ve. */
+  .tarjetas {
+    display: flex;
+    gap: 12px;
+    margin: -4px -4px -26px;
+    padding: 4px 4px 26px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 4px;
+    scrollbar-width: none;
+  }
+  .tarjetas::-webkit-scrollbar {
+    display: none;
   }
   .tarjeta {
     position: relative;
     display: flex;
     flex-direction: column;
+    flex: 1 0 236px;
     min-width: 0;
-    border: 1px solid transparent;
     border-radius: 20px;
+    scroll-snap-align: start;
     transition: background-color var(--dur-color) ease;
   }
   .tarjeta.cargando {
-    min-height: 76px;
+    min-height: 236px;
+    padding: 8px;
   }
   .tarjeta__toque,
   .tarjeta.nueva {
-    display: grid;
-    grid-template-columns: 40px minmax(0, 1fr);
-    column-gap: 12px;
-    row-gap: 1px;
-    align-content: center;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    flex: 1;
     width: 100%;
-    min-height: 76px;
-    padding: 12px 14px;
+    padding: 8px 8px 14px;
     border: 0;
-    border-radius: 19px;
+    border-radius: 20px;
     background: transparent;
     color: var(--texto);
     text-align: left;
     overflow-wrap: break-word;
   }
+  /* "Nueva escena" es más angosta: así la fila termina pareja, sin un hueco grande. */
   .tarjeta.nueva {
-    border: 1px solid transparent;
+    flex: 0 0 184px;
     background: var(--relleno-tarjeta);
   }
   .tarjeta:hover:not(.activa),
@@ -997,42 +1127,80 @@
   .tarjeta.ocupada .tarjeta__toque {
     cursor: progress;
   }
-  .tarjeta__ficha {
-    grid-row: 1 / 4;
-    align-self: start;
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
+
+  /* El escenario: la ilustración sobre un fondo apenas teñido de turquesa, con esquinas suaves. */
+  .tarjeta__escenario {
+    position: relative;
+    display: block;
+    height: 124px;
+    margin-bottom: 8px;
+    padding: 6px 4px 0;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--primario) 6%, var(--superficie-inserto));
+    overflow: hidden;
+  }
+  .tarjeta.activa .tarjeta__escenario {
+    background: color-mix(in srgb, var(--primario) 12%, var(--superficie));
+  }
+  .tarjeta.nueva .tarjeta__escenario {
+    background: var(--superficie-inserto);
+  }
+  .tarjeta.cargando .tarjeta__escenario {
+    background: var(--superficie-inserto);
+  }
+  /* Mientras corre: una línea fina al pie del escenario que crece con cada paso. */
+  .tarjeta__avance {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 8px;
+    height: 3px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--primario) 22%, transparent);
+    overflow: hidden;
+  }
+  .tarjeta__avance span {
+    display: block;
+    height: 100%;
+    background: var(--primario);
+    transform-origin: left center;
+    transition: transform var(--dur-vista) ease;
+  }
+
+  .tarjeta__nombre,
+  .tarjeta__resumen,
+  .tarjeta__estado {
+    padding: 0 6px;
   }
   .tarjeta__nombre {
-    grid-column: 2;
-    max-width: calc(100% - 26px);
-    font: var(--letra-panel);
-    font-size: 15px;
+    font-size: 16px;
+    line-height: 22px;
+    font-weight: 650;
     letter-spacing: -0.01em;
   }
-  .tarjeta.nueva .tarjeta__nombre {
-    max-width: none;
-  }
   .tarjeta__resumen {
-    grid-column: 2;
     font: var(--letra-pequena);
     color: var(--texto-2);
     font-variant-numeric: tabular-nums;
   }
   .tarjeta__estado {
-    grid-column: 2;
     display: flex;
     align-items: flex-start;
     gap: 6px;
-    padding-top: 2px;
+    margin-top: auto;
+    padding-top: 6px;
     font-size: 12.5px;
     line-height: 18px;
     font-weight: 600;
     color: var(--texto-2);
   }
+  .tarjeta__estado .tenue {
+    font-weight: 500;
+    color: var(--texto-3);
+  }
   .tarjeta__estado :global(svg),
-  .tarjeta__estado .girador {
+  .tarjeta__estado .girador,
+  .punto-activa {
     flex-shrink: 0;
     margin-top: 1px;
   }
@@ -1044,6 +1212,17 @@
   .tarjeta__estado :global(svg) {
     color: var(--exito);
   }
+  .punto-activa {
+    width: 7px;
+    height: 7px;
+    margin-top: 6px;
+    border-radius: 50%;
+    background: var(--primario);
+  }
+  .tarjeta.activa .tarjeta__estado,
+  .tarjeta.corriendo .tarjeta__estado {
+    color: var(--elegido-fg);
+  }
   .tarjeta:has(.tarjeta__fallas) .tarjeta__estado,
   .tarjeta:has(.tarjeta__fallas) .tarjeta__estado :global(svg) {
     color: var(--aviso);
@@ -1052,7 +1231,7 @@
     display: grid;
     gap: 4px;
     margin: -6px 0 0;
-    padding: 0 14px 12px 66px;
+    padding: 0 14px 14px;
     font-size: 12.5px;
     line-height: 18px;
     color: var(--texto-2);
@@ -1062,10 +1241,11 @@
     color: var(--texto);
     font-weight: 600;
   }
+  /* El lápiz: un botón redondo chico sobre la esquina del escenario. */
   .tarjeta__editar {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: 14px;
+    right: 14px;
     display: grid;
     place-items: center;
     width: 30px;
@@ -1073,8 +1253,11 @@
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: transparent;
-    color: var(--texto-3);
+    background: var(--superficie);
+    box-shadow:
+      0 0 0 1px var(--borde),
+      var(--sombra-panel);
+    color: var(--texto-2);
     transition:
       background-color var(--dur-color) ease,
       color var(--dur-color) ease;
@@ -1083,11 +1266,15 @@
     background: var(--superficie-hover);
     color: var(--texto);
   }
+  .tarjeta__editar:active {
+    transform: scale(0.96);
+  }
   /* La última activada: lo elegido (turquesa suave, borde fino, nombre en turquesa). */
   .tarjeta.activa {
     background: var(--elegido-bg);
-    border-color: var(--elegido-borde);
-    box-shadow: none;
+    box-shadow:
+      0 0 0 1px var(--elegido-borde),
+      var(--sombra-tarjeta);
   }
   .tarjeta.activa .tarjeta__nombre {
     color: var(--elegido-fg);
