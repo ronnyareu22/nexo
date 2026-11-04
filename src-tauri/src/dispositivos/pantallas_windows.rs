@@ -932,8 +932,10 @@ static ESCRITO_POR_NEXO: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Un cambio que llega hasta 1 s después de que Nexo puso el brillo del portátil es de Nexo.
 const ECO_NEXO: Duration = Duration::from_secs(1);
-/// El aviso de que el portátil volvió a su nivel llega antes de esto.
+/// Mientras el portátil vuelve a su nivel, los avisos que se acercan a ese nivel son de Nexo (no son teclas).
 const ECO_REGRESO: Duration = Duration::from_millis(1500);
+/// El portátil vuelve a su nivel cuando dejas de presionar por este tiempo (una sola vez, no en cada toque).
+const PAUSA_REGRESO: Duration = Duration::from_millis(450);
 /// Una tecla mueve el portátil de 3 a 25 puntos (Windows usa 10; algunos, 5). Menos es el brillo automático;
 /// más, el plan de energía al enchufar o desenchufar. Esos no pasan al monitor.
 const TOQUE: std::ops::RangeInclusive<i32> = 3..=25;
@@ -1032,20 +1034,33 @@ struct Portatil {
     regreso: Option<(u8, Instant)>,
     /// Ruta del objeto con WmiSetBrightness (se busca la primera vez).
     ruta: Option<String>,
+    /// Nivel del portátil antes de la ráfaga de toques que se mandó al monitor, y cuándo fue el último toque.
+    base: Option<(u8, Instant)>,
+    /// La pantalla del portátil en WMI (del último aviso).
+    instancia: String,
 }
 
 impl Portatil {
     /// Un aviso de WMI: el portátil quedó en `nuevo`.
     fn al_cambiar(&mut self, nuevo: u8, instancia: &str, pantallas: &Pantallas) {
+        self.instancia = instancia.to_owned();
         let antes = self.visto.replace(nuevo);
-        // El portátil volvió al nivel que pidió Nexo: es su propio cambio.
-        if let Some((nivel, cuando)) = self.regreso {
-            if cuando.elapsed() > ECO_REGRESO {
-                self.regreso = None;
-            } else if nivel == nuevo {
-                self.regreso = None;
-                return;
+        // El portátil está volviendo al nivel que pidió Nexo. Windows puede avisar pasos intermedios o un valor
+        // redondeado: todo lo que se ACERCA a ese nivel es de Nexo y se ignora (antes se tomaba como otra tecla y
+        // el brillo subía y bajaba en las dos pantallas). Solo lo que se ALEJA es una tecla nueva.
+        let mut base_regreso = None;
+        if let Some((objetivo, cuando)) = self.regreso {
+            if cuando.elapsed() < ECO_REGRESO {
+                let distancia = |n: u8| (n as i32 - objetivo as i32).abs();
+                if distancia(nuevo) <= distancia(antes.unwrap_or(nuevo)) {
+                    if distancia(nuevo) <= 2 {
+                        self.regreso = None;
+                    }
+                    return;
+                }
+                base_regreso = Some(objetivo);
             }
+            self.regreso = None;
         }
         if escrito_por_nexo_hace_poco() || !VIGILAR.load(Ordering::Relaxed) {
             return;
@@ -1068,9 +1083,27 @@ impl Portatil {
         // Un paso por aviso (del tamaño elegido para ese monitor); si llegan varios seguidos, el hilo de pantallas
         // los junta y muestra el aviso.
         pantallas.paso(id, cambio.signum());
-        // El portátil vuelve al nivel de antes del toque (o al que ya se estaba devolviendo).
-        let base = self.regreso.map(|(n, _)| n).unwrap_or(antes);
-        self.devolver(base, instancia);
+        // El portátil vuelve a su nivel de antes de la ráfaga cuando dejes de presionar (ver `al_pasar_el_tiempo`).
+        let base = self.base.map(|(b, _)| b).or(base_regreso).unwrap_or(antes);
+        self.base = Some((base, Instant::now()));
+    }
+
+    /// Se llama tras cada aviso y cada espera: devuelve el portátil cuando dejaste de presionar, y si su aviso
+    /// de regreso nunca llegó, vuelve a leer su nivel para medir bien el próximo toque.
+    fn al_pasar_el_tiempo(&mut self) {
+        if let Some((base, ultimo)) = self.base {
+            if ultimo.elapsed() >= PAUSA_REGRESO {
+                self.base = None;
+                let instancia = self.instancia.clone();
+                self.devolver(base, &instancia);
+            }
+        }
+        if let Some((_, cuando)) = self.regreso {
+            if cuando.elapsed() >= ECO_REGRESO {
+                self.regreso = None;
+                self.visto = nivel_portatil(&self.servicios).or(self.visto);
+            }
+        }
     }
 
     /// WmiSetBrightness al nivel de antes, marcado como de Nexo.
@@ -1084,8 +1117,8 @@ impl Portatil {
         let Some(ruta) = self.ruta.as_deref() else { return };
         self.regreso = Some((nivel, Instant::now()));
         match poner_wmi(&self.servicios, ruta, nivel) {
-            // Ya está ahí aunque su aviso llegue tarde (o no llegue): el próximo toque se mide desde aquí.
-            Ok(()) => self.visto = Some(nivel),
+            // El nivel visto se actualiza con los avisos de WMI (o al terminar la espera del regreso).
+            Ok(()) => {}
             Err(e) => {
                 self.regreso = None;
                 self.ruta = None;
@@ -1093,6 +1126,14 @@ impl Portatil {
             }
         }
     }
+}
+
+/// Nivel actual del brillo del portátil (None en una PC de escritorio).
+fn nivel_portatil(servicios: &IWbemServices) -> Option<u8> {
+    consultar(servicios, "SELECT CurrentBrightness FROM WmiMonitorBrightness WHERE Active = TRUE")
+        .first()
+        .and_then(|o| leer_numero(o, w!("CurrentBrightness")))
+        .map(|b| b.clamp(0, 100) as u8)
 }
 
 /// Se suscribe a WmiMonitorBrightnessEvent y atiende cada aviso hasta que se apague el ajuste.
@@ -1121,24 +1162,25 @@ fn escuchar_portatil(pantallas: &Pantallas) -> Fin {
         )
     };
     // Nivel de partida (en una PC de escritorio no hay: se toma del primer aviso).
-    let visto = consultar(&servicios, "SELECT CurrentBrightness FROM WmiMonitorBrightness WHERE Active = TRUE")
-        .first()
-        .and_then(|o| leer_numero(o, w!("CurrentBrightness")))
-        .map(|b| b.clamp(0, 100) as u8);
-    let mut portatil = Portatil { servicios, visto, regreso: None, ruta: None };
+    let visto = nivel_portatil(&servicios);
+    let mut portatil = Portatil { servicios, visto, regreso: None, ruta: None, base: None, instancia: String::new() };
 
     while VIGILAR.load(Ordering::SeqCst) {
         let mut objetos: [Option<IWbemClassObject>; 1] = [None];
         let mut n = 0u32;
-        // Espera hasta 1 s (WBEM_S_TIMEDOUT si no hubo nada): así ve pronto si se apagó el ajuste.
-        let hr = unsafe { eventos.Next(1000, &mut objetos, &mut n) };
+        // Espera hasta 250 ms (WBEM_S_TIMEDOUT si no hubo nada): así devuelve el portátil a tiempo y ve pronto si se
+        // apagó el ajuste.
+        let hr = unsafe { eventos.Next(250, &mut objetos, &mut n) };
         if hr.is_err() {
             return Fin::Cortado(format!("{:#010x}", hr.0));
         }
-        let Some(o) = objetos[0].take().filter(|_| n > 0) else { continue };
-        let Some(nuevo) = leer_numero(&o, w!("Brightness")) else { continue };
-        let instancia = leer_texto(&o, w!("InstanceName")).unwrap_or_default();
-        portatil.al_cambiar(nuevo.clamp(0, 100) as u8, &instancia, pantallas);
+        if let Some(o) = objetos[0].take().filter(|_| n > 0) {
+            if let Some(nuevo) = leer_numero(&o, w!("Brightness")) {
+                let instancia = leer_texto(&o, w!("InstanceName")).unwrap_or_default();
+                portatil.al_cambiar(nuevo.clamp(0, 100) as u8, &instancia, pantallas);
+            }
+        }
+        portatil.al_pasar_el_tiempo();
     }
     Fin::Apagado
 }
