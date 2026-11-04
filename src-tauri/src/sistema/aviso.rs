@@ -5,7 +5,7 @@
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const ETIQUETA: &str = "aviso";
 const ANCHO: f64 = 320.0;
@@ -37,8 +37,16 @@ pub fn mostrar(app: &AppHandle, pantalla: u32, nivel: u8) {
                 None => return,
             },
         };
+        #[cfg(not(windows))]
         if let Some((x, y)) = posicion(pantalla) {
-            let _ = ventana.set_position(LogicalPosition::new(x, y));
+            let _ = ventana.set_position(tauri::LogicalPosition::new(x, y));
+        }
+        #[cfg(windows)]
+        if let Some(p) = posicion_windows(pantalla) {
+            // Si el monitor tiene otra escala, Windows le cambia el tamaño a la ventana al llegar:
+            // la segunda vez queda justo en su lugar.
+            let _ = ventana.set_position(p);
+            let _ = ventana.set_position(p);
         }
         let _ = app2.emit_to(ETIQUETA, "aviso-brillo", nivel);
         let _ = ventana.show();
@@ -72,7 +80,8 @@ pub fn mostrar(app: &AppHandle, pantalla: u32, nivel: u8) {
 
 fn crear(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     // En desarrollo la sirve Vite como ruta; en la app final es un archivo aparte.
-    let pagina = if tauri::is_dev() { "aviso" } else { "aviso.html" };
+    // Siempre "aviso": Tauri sirve aviso.html, y así la dirección (/aviso) coincide con la ruta de SvelteKit.
+    let pagina = "aviso";
     let ventana = WebviewWindowBuilder::new(app, ETIQUETA, WebviewUrl::App(pagina.into()))
         .title("Brillo")
         .inner_size(ANCHO, ALTO)
@@ -110,7 +119,19 @@ fn posicion(pantalla: u32) -> Option<(f64, f64)> {
     (r.ancho > 0.0).then(|| (r.x + (r.ancho - ANCHO) / 2.0, r.y + r.alto - ALTO - 90.0))
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: abajo al centro de la zona útil del monitor (sin la barra de tareas), a unos 90 px del borde.
+/// Va en píxeles físicos con la escala de ese monitor: en lógicos, Tauri usaría la escala del monitor
+/// donde está la ventana ahora, que puede ser otro.
+#[cfg(windows)]
+fn posicion_windows(pantalla: u32) -> Option<tauri::PhysicalPosition<i32>> {
+    let a = crate::dispositivos::pantallas::area_de_trabajo(pantalla)?;
+    let (ancho, alto, margen) = (ANCHO * a.escala, ALTO * a.escala, 90.0 * a.escala);
+    let x = a.izquierda as f64 + ((a.derecha - a.izquierda) as f64 - ancho) / 2.0;
+    let y = (a.abajo as f64 - alto - margen).max(a.arriba as f64);
+    Some(tauri::PhysicalPosition::new(x.round() as i32, y.round() as i32))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn posicion(_pantalla: u32) -> Option<(f64, f64)> {
     None
 }

@@ -1,15 +1,19 @@
 <!--
-  Panel lateral de Dispositivos (DISENO.md, sección 7.2). De arriba abajo, en este orden:
-  1. foto grande con un resplandor quieto detrás y el botón "⋯" (Ver todos los ajustes · Ajustes de Bluetooth);
-  2. nombre; 3. estado; 4. una línea; 5. batería (si se sabe); 6–7. volumen y micrófono (sonido conectado);
-  8. salida y entrada de audio (aparatos de sonido); 9. acciones: Conectar o Desconectar · Renombrar · Olvidar.
-  Las acciones quedan fijas abajo y lo de arriba se desplaza. Conexión, Automático e Información están en la página
+  Panel lateral de Dispositivos (DISENO.md, sección 7.2). De arriba abajo, en este orden (pedido del dueño):
+  1. foto grande con la aurora detrás y el botón "⋯" (Ver todos los ajustes · Ajustes de Bluetooth);
+  2. nombre y estado (con la marca y el tipo al lado del estado);
+  3. batería, en su grupo (si se sabe);
+  4–5. volumen y micrófono en un grupo, y debajo salida y entrada de audio en otro (aparatos de sonido);
+  6. abajo, fijas, las acciones como una barra nativa: Conectar o Desconectar · Renombrar · Olvidar, con el ícono
+     encima del texto. Mientras conecta o desconecta, el primer botón queda quieto y tenue con su indicador girando.
+  Lo de arriba se desplaza y las acciones quedan fijas. Conexión, Automático e Información están en la página
   del aparato (`onentrar`). Los diálogos de Renombrar y Olvidar los abre la vista.
 -->
 <script lang="ts">
   import { tick } from 'svelte';
+  import { textoAbrirBluetooth } from '$lib/api-sistema';
   import type { Dispositivo } from '$lib/tipos';
-  import { baterias, esDeSonido, estadoDe, nombreDe } from '$lib/tipos';
+  import { baterias, esDeSonido, estadoDe, nombreDe, nombreTipo } from '$lib/tipos';
   import { abrirAjustesBluetooth } from '$lib/api';
   import { tooltip } from '$lib/tooltip';
   import Figura from './Figura.svelte';
@@ -45,6 +49,7 @@
   const nombre = $derived(nombreDe(d));
   const listaBaterias = $derived(baterias(d));
   const deSonido = $derived(esDeSonido(d));
+  const meta = $derived([d.fabricante, nombreTipo[d.tipo]].filter(Boolean).join(' · '));
 
   const ajustesBluetooth = () => abrirAjustesBluetooth().catch((e) => onerror(String(e)));
 
@@ -115,9 +120,9 @@
   }
 </script>
 
-<article class="detalle" aria-labelledby="{id}-nombre">
+<article class="detalle vidrio" aria-labelledby="{id}-nombre">
   <div class="cuerpo">
-    <!-- 1. Foto con resplandor y el menú "⋯" -->
+    <!-- 1. Foto con la aurora y el menú "⋯" -->
     <div class="escenario" class:apagado={!d.conectado}>
       <div class="figura"><Figura dispositivo={d} sombra={false} /></div>
 
@@ -153,39 +158,41 @@
             <Icono nombre="ajustes" tamano={17} /> Ver todos los ajustes
           </button>
           <button class="menu__item" type="button" role="menuitem" tabindex="-1" onclick={() => elegirDelMenu(ajustesBluetooth)}>
-            <Icono nombre="bluetooth" tamano={17} /> Abrir Ajustes de Bluetooth
+            <Icono nombre="bluetooth" tamano={17} /> {textoAbrirBluetooth}
           </button>
         </div>
       {/if}
     </div>
 
-    <!-- 2. Nombre · 3. Estado -->
-    <h2 id="{id}-nombre">{nombre}</h2>
-    <div class="estado"><EstadoChip estado={estadoDe(d, pendiente)} /></div>
+    <!-- 2. Nombre y estado -->
+    <div class="quien">
+      <h2 id="{id}-nombre">{nombre}</h2>
+      <div class="estado">
+        <EstadoChip estado={estadoDe(d, pendiente)} />
+        {#if meta}<span class="meta">{meta}</span>{/if}
+      </div>
+    </div>
 
-    <!-- 4. Línea (solo si hay algo debajo) -->
-    {#if listaBaterias.length || deSonido}<hr />{/if}
-
-    <!-- 5. Batería -->
+    <!-- 3. Batería -->
     {#if listaBaterias.length === 1}
       {@const nivel = listaBaterias[0].nivel}
-      <div class="bateria">
-        <Anillo {nivel} tamano={84} grosor={7} />
+      <div class="bateria inserto">
+        <Anillo {nivel} tamano={64} grosor={6} />
         <div class="bateria__textos">
           <div class="bateria__titulo">Batería</div>
           <div class="bateria__estado">
-            <span class="bateria__icono" style:color={colorBateria(nivel)}><Icono nombre={iconoBateria(nivel)} tamano={16} /></span>
+            <span class="bateria__icono" style:color={colorBateria(nivel)}><Icono nombre={iconoBateria(nivel)} tamano={15} /></span>
             {textoBateria(nivel)}
           </div>
         </div>
       </div>
     {:else if listaBaterias.length > 1}
-      <div class="bateria varias">
+      <div class="bateria varias inserto">
         <div class="bateria__titulo">Batería</div>
         <div class="anillos">
           {#each listaBaterias as b (b.nombre)}
             <div class="anillo-chico">
-              <Anillo nivel={b.nivel} tamano={60} grosor={5} etiqueta={b.nombre} />
+              <Anillo nivel={b.nivel} tamano={56} grosor={5} etiqueta={b.nombre} />
               <span>{b.nombre}</span>
             </div>
           {/each}
@@ -193,41 +200,41 @@
       </div>
     {/if}
 
-    <!-- 6–7. Volumen y micrófono · 8. Salida y entrada de audio -->
+    <!-- 4–5. Volumen y micrófono · salida y entrada de audio -->
     {#if deSonido}
       <ControlesAudio dispositivo={d} {onerror} />
     {/if}
   </div>
 
-  <!-- 9. Acciones, fijas abajo -->
+  <!-- 6. Acciones, fijas abajo -->
   <div class="pie">
     {#if avisoOlvidar}
       <div class="aviso" role="status">
         <Icono nombre="info" tamano={18} />
         <div>
           <p>{avisoOlvidar}</p>
-          <button class="enlace" onclick={ajustesBluetooth}>Abrir Ajustes de Bluetooth</button>
+          <button class="enlace" onclick={ajustesBluetooth}>{textoAbrirBluetooth}</button>
         </div>
       </div>
     {/if}
 
-    <div class="acciones">
+    <div class="barra-acciones" role="group" aria-label="Acciones de {nombre}">
       {#if d.conectado}
-        <button class="accion" onclick={onalternar} disabled={pendiente} aria-busy={pendiente}>
-          <Icono nombre="desconectar" tamano={20} />
-          <span>Desconectar</span>
+        <button type="button" onclick={onalternar} disabled={pendiente} aria-busy={pendiente}>
+          {#if pendiente}<span class="girador" aria-hidden="true"></span>{:else}<Icono nombre="desconectar" tamano={20} />{/if}
+          <span>{pendiente ? 'Desconectando…' : 'Desconectar'}</span>
         </button>
       {:else}
-        <button class="accion primaria" onclick={onalternar} disabled={pendiente} aria-busy={pendiente}>
-          <Icono nombre="conectar" tamano={20} />
-          <span>Conectar</span>
+        <button type="button" class="primaria" onclick={onalternar} disabled={pendiente} aria-busy={pendiente}>
+          {#if pendiente}<span class="girador" aria-hidden="true"></span>{:else}<Icono nombre="conectar" tamano={20} />{/if}
+          <span>{pendiente ? 'Conectando…' : 'Conectar'}</span>
         </button>
       {/if}
-      <button class="accion" onclick={onrenombrar}>
+      <button type="button" onclick={onrenombrar}>
         <Icono nombre="editar" tamano={20} />
         <span>Renombrar</span>
       </button>
-      <button class="accion olvidar" onclick={onolvidar}>
+      <button type="button" class="peligro" onclick={onolvidar}>
         <Icono nombre="papelera" tamano={20} />
         <span>Olvidar</span>
       </button>
@@ -242,9 +249,7 @@
     height: 100%;
     min-height: 0;
     overflow: hidden;
-    border: 1px solid var(--borde);
     border-radius: var(--radio-lg);
-    background: var(--superficie);
   }
 
   .cuerpo {
@@ -254,25 +259,28 @@
     overscroll-behavior: contain;
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    padding: 14px 20px 20px;
+    gap: 14px;
+    padding: 14px 18px 18px;
   }
 
-  /* 1. Escenario: la foto sobre un resplandor turquesa y azul, pintado una vez (sin filtros ni animación). */
+  /* 1. Escenario: la foto sobre la aurora (turquesa y azul) y una sombra de apoyo, pintadas una vez. */
   .escenario {
     position: relative;
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    height: 212px;
+    height: 204px;
+    margin: 0 -4px;
+    border-radius: 18px;
     background:
-      radial-gradient(50% 48% at 50% 56%, var(--aurora-1), transparent 72%),
-      radial-gradient(42% 46% at 32% 40%, var(--aurora-2), transparent 70%),
-      radial-gradient(40% 44% at 70% 36%, var(--aurora-3), transparent 70%);
+      radial-gradient(30% 6% at 50% 91%, var(--sombra-apoyo), transparent 100%),
+      radial-gradient(48% 46% at 50% 54%, var(--aurora-1), transparent 72%),
+      radial-gradient(40% 44% at 30% 40%, var(--aurora-2), transparent 70%),
+      radial-gradient(40% 44% at 72% 34%, var(--aurora-3), transparent 70%);
   }
   .figura {
-    width: 196px;
-    height: 196px;
+    width: 184px;
+    height: 184px;
     transition: opacity var(--dur-vista) ease;
   }
   .apagado .figura {
@@ -281,17 +289,20 @@
 
   .mas {
     position: absolute;
-    top: 2px;
-    right: -6px;
+    top: 0;
+    right: 0;
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: var(--superficie-elevada);
-    box-shadow: inset 0 0 0 1px var(--borde);
+    background: var(--relleno-tarjeta);
+    box-shadow:
+      inset 0 1px 0 var(--luz-tope),
+      0 0 0 1px var(--borde-tarjeta),
+      var(--sombra-tarjeta);
     color: var(--texto-2);
     transition:
       background-color var(--dur-color) ease,
@@ -309,11 +320,11 @@
   .menu {
     position: absolute;
     z-index: 5;
-    top: 44px;
-    right: -6px;
+    top: 42px;
+    right: 0;
     display: grid;
     min-width: 236px;
-    max-width: calc(100% + 6px);
+    max-width: 100%;
     padding: 4px;
     border-radius: var(--radio-sm);
   }
@@ -344,47 +355,55 @@
     background: var(--superficie-hover);
   }
 
-  /* 2–4. Nombre, estado y línea */
+  /* 2. Nombre y estado */
+  .quien {
+    display: grid;
+    gap: 8px;
+    padding: 0 2px 2px;
+  }
   h2 {
-    margin: 2px 0 -8px;
+    margin: 0;
     overflow-wrap: anywhere;
     font-size: 22px;
     line-height: 28px;
     font-weight: 700;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.022em;
   }
   .estado {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
   }
-  hr {
-    width: 100%;
-    margin: 0;
-    border: 0;
-    border-top: 1px solid var(--borde);
+  .meta {
+    font-size: 12.5px;
+    line-height: 18px;
+    color: var(--texto-3);
   }
 
-  /* 5. Batería */
+  /* 3. Batería */
   .bateria {
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 14px;
+    padding: 12px 14px 12px 12px;
   }
   .bateria__textos {
     min-width: 0;
     display: grid;
-    gap: 4px;
+    gap: 3px;
   }
   .bateria__titulo {
-    font-size: 15px;
-    line-height: 22px;
-    font-weight: 700;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 650;
   }
   .bateria__estado {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
-    line-height: 19px;
+    font-size: 12.5px;
+    line-height: 18px;
     color: var(--texto-2);
   }
   .bateria__icono {
@@ -394,6 +413,7 @@
   .bateria.varias {
     display: grid;
     gap: 10px;
+    padding: 12px 14px 14px;
   }
   .anillos {
     display: flex;
@@ -404,67 +424,18 @@
     display: grid;
     justify-items: center;
     gap: 6px;
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--texto-2);
   }
 
-  /* 9. Pie fijo: aviso de Olvidar y las tres acciones (ícono sobre el texto) */
+  /* 6. Pie fijo: aviso de Olvidar y la barra de acciones */
   .pie {
     flex-shrink: 0;
     display: grid;
     gap: 12px;
-    padding: 14px 20px 18px;
+    padding: 12px 18px 18px;
     border-top: 1px solid var(--borde);
-  }
-  .acciones {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-  }
-  .accion {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-width: 0;
-    min-height: 66px;
-    padding: 10px 6px;
-    border: 0;
-    border-radius: 14px;
-    background: var(--superficie-elevada);
-    box-shadow: inset 0 0 0 1px var(--borde);
-    color: var(--texto);
-    font-size: 12.5px;
-    line-height: 17px;
-    font-weight: 600;
-    text-align: center;
-    overflow-wrap: anywhere;
-    transition: background-color var(--dur-color) ease;
-  }
-  .accion :global(svg) {
-    flex-shrink: 0;
-  }
-  .accion:hover:not(:disabled) {
-    background: var(--superficie-hover);
-  }
-  .accion:active:not(:disabled) {
-    transform: scale(0.98);
-  }
-  .accion:disabled {
-    opacity: 0.6;
-    cursor: progress;
-  }
-  .accion.primaria {
-    background: var(--primario);
-    color: var(--sobre-primario);
-    box-shadow: none;
-  }
-  .accion.primaria:hover:not(:disabled) {
-    background: var(--primario-hover);
-  }
-  .accion.olvidar {
-    color: var(--error);
+    background: var(--superficie-base);
   }
 
   .aviso {

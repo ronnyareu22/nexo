@@ -4,6 +4,7 @@
 //! y varios toques seguidos de las teclas de brillo se juntan en un solo cambio.
 //! La resolución, la frecuencia y cuál es la pantalla principal se cambian con CoreGraphics
 //! (funciones sueltas al final: no tocan DDC, así que no pasan por ese hilo).
+//! Windows tiene lo mismo en `pantallas_windows.rs` (DDC con dxva2, WMI y ChangeDisplaySettingsEx).
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -28,7 +29,8 @@ pub struct Pantalla {
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct ModoPantalla {
-    /// Identificador del modo en macOS (ioDisplayModeID); es lo que recibe `cambiar_modo`.
+    /// Identificador del modo; es lo que recibe `cambiar_modo`. En macOS, su ioDisplayModeID;
+    /// en Windows, su número en la lista del controlador (iModeNum de EnumDisplaySettingsExW).
     pub id: i32,
     /// Tamaño del escritorio en puntos (lo que se ve como "resolución").
     pub ancho: u32,
@@ -48,6 +50,7 @@ enum Orden {
     Listar(mpsc::Sender<Vec<Pantalla>>),
     PonerBrillo(u32, u8, mpsc::Sender<Result<u8, String>>),
     /// Un toque de tecla: +1 sube, −1 baja (en pasos de 1/16).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))] // hoy solo lo usa el atajo de teclas de la Mac
     Paso(u32, i32),
     Refrescar,
 }
@@ -58,8 +61,10 @@ pub type Aviso = Box<dyn Fn(u32, u8) + Send>;
 pub struct Pantallas {
     tx: Mutex<mpsc::Sender<Orden>>,
     /// Monitores externos que responden a DDC (lo consulta el atajo de teclas sin esperar).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     controlables: Arc<Mutex<HashSet<u32>>>,
     /// Último brillo conocido de cada monitor externo (para leerlo al instante).
+    /// En Windows también el de la pantalla del portátil (WMI tampoco se lee al instante).
     brillos_externos: Arc<Mutex<HashMap<u32, u8>>>,
 }
 
@@ -97,10 +102,12 @@ impl Pantallas {
     }
 
     /// Lo usa el atajo de teclas: no espera respuesta.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn paso(&self, id: u32, pasos: i32) {
         self.enviar(Orden::Paso(id, pasos));
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn refrescar(&self) {
         self.enviar(Orden::Refrescar);
     }
@@ -116,6 +123,7 @@ impl Pantallas {
         lista
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn es_controlable(&self, id: u32) -> bool {
         self.controlables.lock().map(|c| c.contains(&id)).unwrap_or(false)
     }
@@ -126,36 +134,46 @@ impl Pantallas {
 #[cfg(target_os = "macos")]
 pub use mac::{cambiar_modo, hacer_principal, modos};
 
-#[cfg(not(target_os = "macos"))]
+// Windows: todo en su propio archivo, con la misma interfaz.
+#[cfg(windows)]
+#[path = "pantallas_windows.rs"]
+mod win;
+
+#[cfg(windows)]
+pub use win::{area_de_trabajo, cambiar_modo, hacer_principal, modos};
+
+#[cfg(windows)]
+use win::trabajador;
+
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn modos(_id: u32) -> Vec<ModoPantalla> {
     Vec::new()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn cambiar_modo(_id: u32, _modo: i32) -> Result<(), String> {
-    Err("Todavía no disponible en Windows".into())
+    Err("Todavía no disponible en este sistema".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn hacer_principal(_id: u32) -> Result<(), String> {
-    Err("Todavía no disponible en Windows".into())
+    Err("Todavía no disponible en este sistema".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn trabajador(
     rx: mpsc::Receiver<Orden>,
     _controlables: Arc<Mutex<HashSet<u32>>>,
     _brillos: Arc<Mutex<HashMap<u32, u8>>>,
     _aviso: Aviso,
 ) {
-    // Windows: pendiente (DDC con ddc-winapi).
     for orden in rx {
         match orden {
             Orden::Listar(t) => {
                 let _ = t.send(Vec::new());
             }
             Orden::PonerBrillo(_, _, t) => {
-                let _ = t.send(Err("Todavía no disponible en Windows".into()));
+                let _ = t.send(Err("Todavía no disponible en este sistema".into()));
             }
             Orden::Paso(..) | Orden::Refrescar => {}
         }

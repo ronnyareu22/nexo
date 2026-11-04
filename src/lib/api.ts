@@ -203,6 +203,17 @@ const ejemplo: Estado = {
       bateria: null, bateriaIzquierda: null, bateriaDerecha: null, bateriaEstuche: null,
       fabricante: 'Beats', firmware: '7.8.8', vendorId: '0x004C', productId: '0x2006',
     },
+    // Los Logitech de la oficina (en la PC con Windows); aquí solo para revisar el diseño.
+    {
+      id: 'D4:12:7A:5C:0B:41', nombre: 'MX Master 4', alias: null, tipo: 'mouse', conectado: true,
+      bateria: 85, bateriaIzquierda: null, bateriaDerecha: null, bateriaEstuche: null,
+      fabricante: 'Logitech', firmware: null, vendorId: '0x046D', productId: null,
+    },
+    {
+      id: 'D4:12:7A:5C:0B:42', nombre: 'Wave Keys', alias: null, tipo: 'teclado', conectado: true,
+      bateria: 70, bateriaIzquierda: null, bateriaDerecha: null, bateriaEstuche: null,
+      fabricante: 'Logitech', firmware: null, vendorId: '0x046D', productId: null,
+    },
     {
       id: 'EC:28:D3:02:FE:AB', nombre: 'iPhone de Ronny', alias: null, tipo: 'telefono', conectado: false,
       bateria: null, bateriaIzquierda: null, bateriaDerecha: null, bateriaEstuche: null,

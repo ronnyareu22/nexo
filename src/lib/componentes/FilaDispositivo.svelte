@@ -1,19 +1,24 @@
 <!--
-  Fila de un aparato (DISENO.md, sección 5): foto o ilustración, nombre (o su alias), el estado y la batería
-  en una línea, y a la derecha un chevron o, si se pasa `onalternar`, el interruptor para conectar.
+  Fila de un aparato (DISENO.md, sección 5): foto o ilustración, nombre (o su alias), el estado con la pila chica
+  y su nivel, y a la derecha un chevron o, si se pasa `onalternar`, el interruptor para conectar.
+  `acciones` agrega atajos propios del aparato antes del interruptor (por ejemplo, silenciar).
   Toda la fila abre el aparato (`onabrir`); la elegida va en turquesa suave. El hover solo cambia el fondo.
-  `grande` es la tarjeta de Dispositivos: foto grande sin cuadro detrás y el chevron como botón propio
-  (`onentrar`) que abre todos los ajustes. También entran el doble clic y Enter sobre la tarjeta ya elegida.
+  Variantes:
+  - `grande`: la tarjeta de Dispositivos; foto grande sin cuadro, marca y tipo, y el chevron como botón propio
+    (`onentrar`) que abre todos los ajustes. También entran el doble clic y Enter sobre la tarjeta ya elegida.
+  - `agrupada`: fila sin borde ni fondo propio, para listas dentro de una tarjeta (Inicio).
   Ningún texto se corta: si no cabe, baja de línea.
 -->
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import type { Dispositivo } from '$lib/tipos';
-  import { nivelPrincipal, nombreDe } from '$lib/tipos';
+  import { nivelPrincipal, nombreDe, nombreTipo } from '$lib/tipos';
   import { cuando } from '$lib/tiempo';
   import { tooltip } from '$lib/tooltip';
   import Figura from './Figura.svelte';
   import Interruptor from './Interruptor.svelte';
   import Icono from './Icono.svelte';
+  import { colorBateria } from './PanelBateria.svelte';
 
   let {
     dispositivo: d,
@@ -21,6 +26,8 @@
     elegido = false,
     ultimaVez = null,
     grande = false,
+    agrupada = false,
+    acciones,
     onabrir,
     onalternar,
     onentrar,
@@ -32,6 +39,10 @@
     ultimaVez?: number | null;
     /** Tarjeta grande de la sección Dispositivos. */
     grande?: boolean;
+    /** Fila sin borde ni fondo, dentro de una tarjeta. */
+    agrupada?: boolean;
+    /** Atajos propios del aparato, a la izquierda del interruptor o del chevron. */
+    acciones?: Snippet<[Dispositivo]>;
     onabrir: () => void;
     /** Si está, en lugar del chevron va un interruptor para conectar o desconectar. */
     onalternar?: () => void;
@@ -42,11 +53,7 @@
   const id = $props.id();
   const nombre = $derived(nombreDe(d));
   const nivel = $derived(nivelPrincipal(d));
-  const linea = $derived.by(() => {
-    if (pendiente) return d.conectado ? 'Desconectando…' : 'Conectando…';
-    if (d.conectado) return nivel !== null ? `Conectado • ${nivel}% batería` : 'Conectado';
-    return ultimaVez ? `Desconectado · usado ${cuando(ultimaVez)}` : 'Desconectado';
-  });
+  const meta = $derived([d.fabricante, nombreTipo[d.tipo]].filter(Boolean).join(' · '));
   const tono = $derived(
     pendiente ? 'pendiente' : d.conectado ? (nivel !== null && nivel <= 20 ? 'baja' : 'conectado') : 'apagado',
   );
@@ -60,8 +67,8 @@
   }
 </script>
 
-<div class="fila" class:grande class:activa={elegido} class:apagado={!d.conectado} data-dispositivo={d.id}>
-  <!-- Toda la fila abre el aparato; el interruptor y el chevron quedan por encima y funcionan aparte. -->
+<div class="fila" class:grande class:agrupada class:activa={elegido} class:apagado={!d.conectado} data-dispositivo={d.id}>
+  <!-- Toda la fila abre el aparato; el interruptor, los atajos y el chevron quedan por encima y funcionan aparte. -->
   <button
     class="abrir"
     onclick={onabrir}
@@ -76,11 +83,30 @@
 
   <span class="textos">
     <span class="nombre">{nombre}</span>
+    {#if grande && meta}<span class="meta">{meta}</span>{/if}
     <span class="linea {tono}">
       <span class="punto" aria-hidden="true"></span>
-      <span id="{id}-linea">{linea}</span>
+      <span id="{id}-linea" class="linea__texto">
+        {#if pendiente}
+          {d.conectado ? 'Desconectando…' : 'Conectando…'}
+        {:else if d.conectado}
+          Conectado{#if nivel !== null}
+            <span class="separador" aria-hidden="true">·</span>
+            <span class="nivel">
+              <span class="mini-bateria" style:--nivel="{nivel}%" style:--tono={colorBateria(nivel)} aria-hidden="true"></span>
+              {nivel} % batería
+            </span>
+          {/if}
+        {:else}
+          Desconectado{#if ultimaVez}<span class="separador" aria-hidden="true">·</span> usado {cuando(ultimaVez)}{/if}
+        {/if}
+      </span>
     </span>
   </span>
+
+  {#if acciones}
+    <span class="acciones">{@render acciones(d)}</span>
+  {/if}
 
   {#if onalternar}
     <span class="control">
@@ -108,16 +134,19 @@
     gap: 14px;
     min-height: 76px;
     padding: 10px 14px 10px 10px;
-    border: 1px solid var(--borde);
     border-radius: var(--radio-md);
-    background: var(--superficie);
-    transition:
-      background-color var(--dur-color) ease,
-      border-color var(--dur-color) ease;
+    background: var(--relleno-tarjeta);
+    box-shadow:
+      inset 0 1px 0 var(--luz-tope),
+      0 0 0 1px var(--borde-tarjeta),
+      var(--sombra-tarjeta);
+    transition: background-color var(--dur-color) ease;
   }
   .fila.activa {
     background: var(--elegido-bg);
-    border-color: var(--elegido-borde);
+    box-shadow:
+      inset 0 0 0 1px var(--elegido-borde),
+      var(--sombra-tarjeta);
   }
   .fila:not(.activa):has(.abrir:hover) {
     background: var(--superficie-hover);
@@ -128,7 +157,7 @@
 
   .abrir {
     position: absolute;
-    inset: -1px;
+    inset: 0;
     z-index: 1;
     padding: 0;
     border: 0;
@@ -144,7 +173,7 @@
     height: 56px;
     padding: 6px;
     border-radius: 14px;
-    background: var(--superficie-elevada);
+    background: var(--superficie-inserto);
     pointer-events: none;
   }
   .figura :global(img),
@@ -168,7 +197,14 @@
     font-size: 14px;
     font-weight: 600;
     line-height: 20px;
+    letter-spacing: -0.005em;
     color: var(--texto);
+  }
+  .meta {
+    font-size: 12.5px;
+    line-height: 17px;
+    color: var(--texto-3);
+    overflow-wrap: break-word;
   }
   .linea {
     display: flex;
@@ -180,6 +216,17 @@
     color: var(--texto-2);
     font-variant-numeric: tabular-nums;
   }
+  .linea__texto {
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+  .separador {
+    margin: 0 5px;
+    color: var(--texto-3);
+  }
+  .nivel {
+    white-space: nowrap;
+  }
   .punto {
     flex-shrink: 0;
     align-self: center;
@@ -187,15 +234,19 @@
     height: 7px;
     border-radius: 50%;
     background: var(--exito);
+    box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--exito) 20%, transparent);
   }
   .apagado .punto {
     background: var(--texto-3);
+    box-shadow: none;
   }
   .baja .punto {
     background: var(--aviso);
+    box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--aviso) 20%, transparent);
   }
   .pendiente .punto {
     background: var(--primario);
+    box-shadow: none;
     animation: parpadeo 900ms ease-in-out infinite;
   }
   @keyframes parpadeo {
@@ -204,6 +255,14 @@
     }
   }
 
+  .acciones {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
   .control {
     position: relative;
     z-index: 2;
@@ -251,27 +310,44 @@
   /* Tarjeta grande de Dispositivos: unos 120 px de alto, foto grande sin cuadro detrás. */
   .grande {
     gap: 16px;
-    min-height: 120px;
+    min-height: 116px;
     padding: 10px 12px 10px 14px;
-    border-radius: 18px;
+    border-radius: 20px;
   }
   .grande .figura {
-    width: clamp(72px, 26%, 100px);
-    height: 100px;
+    width: clamp(72px, 24%, 96px);
+    height: 92px;
     padding: 0;
     border-radius: 0;
     background: none;
   }
   .grande .textos {
-    gap: 4px;
+    gap: 3px;
   }
   .grande .nombre {
-    font-size: 17px;
-    line-height: 23px;
-    letter-spacing: -0.01em;
+    font-size: 16.5px;
+    line-height: 22px;
+    letter-spacing: -0.015em;
   }
   .grande .linea {
+    margin-top: 3px;
     font-size: 13px;
     line-height: 19px;
+  }
+
+  /* Agrupada: sin borde ni fondo propios; el hover pinta solo la fila. */
+  .agrupada {
+    min-height: 68px;
+    padding: 8px 10px 8px 6px;
+    border-radius: 14px;
+    background: transparent;
+    box-shadow: none;
+  }
+  .agrupada .figura {
+    width: 64px;
+    height: 52px;
+    padding: 0;
+    border-radius: 0;
+    background: none;
   }
 </style>

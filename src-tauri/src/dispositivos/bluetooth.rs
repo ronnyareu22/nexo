@@ -2,9 +2,12 @@
 //!
 //! Mac: lee `system_profiler SPBluetoothDataType -json` (tarda unos 60 ms) y usa IOBluetooth para conectar.
 //! Olvidar usa `remove`, un mensaje privado de IOBluetooth: solo se llama si existe y se confirma el resultado.
-//! Windows: pendiente (Windows.Devices.Bluetooth); por ahora devuelve la lista vacía.
+//! Windows: Win32 Bluetooth, WinRT y el filtro de sonido Bluetooth (en `bluetooth_windows.rs`).
 
-use super::{Dispositivo, Estado, Tipo};
+#[cfg(not(windows))]
+use super::Estado;
+#[cfg(target_os = "macos")]
+use super::{Dispositivo, Tipo};
 
 #[cfg(target_os = "macos")]
 pub fn listar() -> Result<Estado, String> {
@@ -184,17 +187,24 @@ pub fn olvidar(direccion: &str) -> Result<(), String> {
     Err(NO_SE_PUDO_OLVIDAR.into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+#[path = "bluetooth_windows.rs"]
+mod sistema;
+#[cfg(windows)]
+pub use sistema::{cambiar_conexion, listar, olvidar};
+
+// En otros sistemas no hay Bluetooth que controlar.
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn olvidar(_direccion: &str) -> Result<(), String> {
-    Err("Todavía no disponible en Windows".into())
+    Err("No disponible en este sistema".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn listar() -> Result<Estado, String> {
-    Ok(Estado { bluetooth_encendido: true, dispositivos: Vec::new() })
+    Ok(Estado { bluetooth_encendido: false, dispositivos: Vec::new() })
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn cambiar_conexion(_direccion: &str, _conectar: bool) -> Result<(), String> {
-    Err("Todavía no disponible en Windows".into())
+    Err("No disponible en este sistema".into())
 }

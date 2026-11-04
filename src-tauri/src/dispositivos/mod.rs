@@ -7,6 +7,9 @@ mod audio;
 mod bluetooth;
 pub mod historial;
 pub mod pantallas;
+/// Windows: COM, nodos PnP y puntos de sonido que comparten Bluetooth y sonido.
+#[cfg(windows)]
+mod win;
 
 use historial::{Automatico, Historial, Registro};
 use pantallas::{ModoPantalla, Pantalla, Pantallas};
@@ -79,6 +82,9 @@ pub fn poner_alias(historial: State<'_, Arc<Historial>>, id: String, alias: Opti
 /// Olvida (desempareja) un aparato Bluetooth. Si macOS no lo permite, el error pide hacerlo en Ajustes.
 #[tauri::command]
 pub async fn olvidar_dispositivo(id: String) -> Result<(), String> {
+    if crate::sistema::permisos::bluetooth() != "concedido" {
+        return Err("Nexo necesita el permiso de Bluetooth. Actívalo en Ajustes › Permisos.".into());
+    }
     tauri::async_runtime::spawn_blocking(move || bluetooth::olvidar(&id))
         .await
         .map_err(|e| e.to_string())?
@@ -87,6 +93,11 @@ pub async fn olvidar_dispositivo(id: String) -> Result<(), String> {
 /// Conecta (`conectar = true`) o desconecta un dispositivo Bluetooth emparejado.
 #[tauri::command]
 pub async fn cambiar_conexion(id: String, conectar: bool) -> Result<(), String> {
+    // Sin el permiso de Bluetooth, macOS deja la llamada esperando su aviso (y la app "girando" sin fin):
+    // mejor decirlo enseguida.
+    if crate::sistema::permisos::bluetooth() != "concedido" {
+        return Err("Nexo necesita el permiso de Bluetooth. Actívalo en Ajustes › Permisos.".into());
+    }
     tauri::async_runtime::spawn_blocking(move || bluetooth::cambiar_conexion(&id, conectar))
         .await
         .map_err(|e| e.to_string())?
@@ -226,20 +237,22 @@ pub fn abrir_ajustes_bluetooth() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("/usr/bin/open").arg("x-apple.systempreferences:com.apple.BluetoothSettings").spawn();
     #[cfg(windows)]
-    let r = std::process::Command::new("cmd").args(["/C", "start", "ms-settings:bluetooth"]).spawn();
+    // explorer abre la Configuración sin que se asome una ventana de consola.
+    let r = std::process::Command::new("explorer").arg("ms-settings:bluetooth").spawn();
     r.map(|_| ()).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------- Cuenta del sistema
 
-/// Nombre de pila de quien usa la cuenta, para el saludo de Inicio ("Hola, Ronny").
-/// Vacío solo si el sistema no da ningún nombre.
+/// Nombre para el saludo de Inicio ("Hola, Ronny"): el que escribió la persona en la bienvenida
+/// o, si no hay, el de pila de la cuenta. Vacío solo si el sistema no da ningún nombre.
 #[tauri::command]
-pub async fn nombre_usuario() -> String {
-    tauri::async_runtime::spawn_blocking(nombre_de_pila).await.unwrap_or_default()
+pub async fn nombre_usuario(app: tauri::AppHandle) -> String {
+    tauri::async_runtime::spawn_blocking(move || crate::sistema::nombre_para_saludo(&app)).await.unwrap_or_default()
 }
 
-fn nombre_de_pila() -> String {
+/// Nombre de pila de quien usa la cuenta del sistema.
+pub fn nombre_de_pila() -> String {
     // Del nombre completo, la primera palabra ("Ronny Isaac Arellano" → "Ronny").
     let completo = nombre_completo().and_then(|n| n.split_whitespace().next().map(str::to_string));
     // Si no, el usuario de la cuenta ("ronny" → "Ronny").

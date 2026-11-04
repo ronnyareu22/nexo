@@ -1,12 +1,18 @@
-<!-- Ajustes automáticos de un aparato: usarlo para el sonido al conectarse y avisar con batería baja. -->
+<!-- Tarjeta "Automático" de un aparato: usarlo para el sonido al conectarse y avisar con batería baja.
+     La tarjeta está desde el principio (con siluetas mientras lee) para que la página no salte al cargar.
+     Mide lo justo: en la página no se estira (el alto que sobra se lo llevan las tarjetas con gráficas). -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { guardarAutomatico, leerAutomatico } from '$lib/api';
+  import { esMac } from '$lib/api-sistema';
   import type { Automatico, Dispositivo } from '$lib/tipos';
   import { esDeSonido } from '$lib/tipos';
   import Interruptor from './Interruptor.svelte';
+  import Icono, { type Nombre } from './Icono.svelte';
 
   let { dispositivo: d, onerror }: { dispositivo: Dispositivo; onerror: (texto: string) => void } = $props();
+
+  const id = $props.id();
 
   let ajustes = $state<Automatico | null>(null);
   onMount(() => {
@@ -25,58 +31,84 @@
       onerror(String(e));
     }
   }
+
+  const sistema = esMac ? 'macOS' : 'Windows';
+  const equipo = esMac ? 'la Mac' : 'la computadora';
+
+  const filas = $derived<{ campo: keyof Automatico; icono: Nombre; tono: string; titulo: string; ayuda: string }[]>([
+    ...(esDeSonido(d)
+      ? [
+          {
+            campo: 'usarSalidaAlConectar' as const,
+            icono: 'volumen' as const,
+            tono: 'var(--celeste)',
+            titulo: 'Usar para el sonido al conectarse',
+            ayuda: `Al conectarse, el sonido de ${equipo} pasa a este aparato.`,
+          },
+        ]
+      : []),
+    {
+      campo: 'avisarBateriaBaja',
+      icono: 'bateria',
+      tono: 'var(--exito)',
+      titulo: 'Avisarme con batería baja',
+      ayuda: `Una notificación de ${sistema} cuando baje del 20 %.`,
+    },
+  ]);
 </script>
 
-{#if ajustes}
-  <section class="panel vidrio">
-    <h2>Automático</h2>
-    {#if esDeSonido(d)}
-      <div class="fila">
-        <div class="textos">
-          <div class="titulo">Usar para el sonido al conectarse</div>
-          <div class="ayuda">Al encenderlos, el sonido de la Mac pasa a estos audífonos.</div>
-        </div>
-        <Interruptor
-          encendido={ajustes.usarSalidaAlConectar}
-          etiqueta="Usar para el sonido al conectarse"
-          oncambio={() => cambiar('usarSalidaAlConectar')}
-        />
-      </div>
-    {/if}
-    <div class="fila" class:separada={esDeSonido(d)}>
-      <div class="textos">
-        <div class="titulo">Avisarme con batería baja</div>
-        <div class="ayuda">Una notificación de macOS cuando baje del 20 %.</div>
-      </div>
-      <Interruptor
-        encendido={ajustes.avisarBateriaBaja}
-        etiqueta="Avisarme con batería baja"
-        oncambio={() => cambiar('avisarBateriaBaja')}
-      />
+<section class="panel vidrio" aria-labelledby="{id}-titulo">
+  <header class="t-cabeza">
+    <span class="ficha-icono"><Icono nombre="automatizaciones" tamano={19} /></span>
+    <div class="t-textos">
+      <h2 class="t-titulo" id="{id}-titulo">Automático</h2>
+      <p class="t-sub">Nexo lo hace solo, sin que abras nada</p>
     </div>
-  </section>
-{/if}
+  </header>
+
+  <ul class="filas inserto" aria-busy={!ajustes}>
+    {#each filas as f (f.campo)}
+      <li class="fila">
+        <span class="ficha-icono chica" style:--tono={f.tono}><Icono nombre={f.icono} tamano={16} /></span>
+        <div class="textos">
+          <div class="titulo">{f.titulo}</div>
+          <div class="ayuda">{f.ayuda}</div>
+        </div>
+        {#if ajustes}
+          <Interruptor encendido={ajustes[f.campo]} etiqueta={f.titulo} oncambio={() => cambiar(f.campo)} />
+        {:else}
+          <span class="silueta" aria-hidden="true"></span>
+        {/if}
+      </li>
+    {/each}
+  </ul>
+</section>
 
 <style>
   .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px;
     border-radius: var(--radio-lg);
-    padding: 18px 20px;
   }
-  h2 {
-    margin: 0 0 14px;
-    font-size: 15px;
-    line-height: 22px;
-    font-weight: 650;
+  .filas {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0 14px;
+    list-style: none;
   }
   .fila {
+    flex: 1 1 auto;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    gap: 12px;
+    min-height: 64px;
+    padding: 12px 0;
   }
-  .separada {
-    margin-top: 16px;
-    padding-top: 16px;
+  .fila + .fila {
     border-top: 1px solid var(--borde);
   }
   .textos {
@@ -84,12 +116,27 @@
     min-width: 0;
   }
   .titulo {
-    font-weight: 650;
+    font-size: 13.5px;
+    line-height: 19px;
+    font-weight: 600;
   }
   .ayuda {
     margin-top: 2px;
     font-size: 12.5px;
-    line-height: 1.4;
+    line-height: 17px;
     color: var(--texto-2);
+  }
+  .silueta {
+    flex-shrink: 0;
+    width: 50px;
+    height: 30px;
+    border-radius: 99px;
+    background: var(--superficie-hundida);
+    animation: respirar 1.4s ease-in-out infinite;
+  }
+  @keyframes respirar {
+    50% {
+      opacity: 0.55;
+    }
   }
 </style>

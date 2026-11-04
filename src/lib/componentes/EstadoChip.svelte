@@ -1,8 +1,9 @@
-<!-- Estado de conexión: conectado (verde), conectando o desconectando (primario, parpadea) o desconectado (gris). -->
+<!-- Estado de conexión: conectado (verde), conectando o desconectando (primario, parpadea) o desconectado (gris).
+     El punto lleva un halo fino del mismo tono; `chico` para filas y tarjetas apretadas. -->
 <script lang="ts">
   import type { EstadoConexion } from '$lib/tipos';
 
-  let { estado }: { estado: EstadoConexion } = $props();
+  let { estado, chico = false }: { estado: EstadoConexion; chico?: boolean } = $props();
 
   const textos: Record<EstadoConexion, string> = {
     conectado: 'Conectado',
@@ -12,48 +13,57 @@
   };
 </script>
 
-<span class="chip {estado}">
-  <span class="punto"></span>
+<span class="chip {estado}" class:chico>
+  <span class="punto" aria-hidden="true"></span>
   {textos[estado]}
 </span>
 
 <style>
   .chip {
+    --tono: var(--texto-3);
     display: inline-flex;
     align-items: center;
     gap: 7px;
     min-height: 26px;
-    padding: 2px 11px 2px 9px;
+    padding: 3px 11px 3px 9px;
     border-radius: 99px;
     font-size: 12.5px;
     line-height: 18px;
     font-weight: 600;
-    background: var(--superficie-hundida);
+    letter-spacing: 0.005em;
     color: var(--texto-2);
-    box-shadow: inset 0 0 0 1px var(--borde);
+    background: color-mix(in srgb, var(--tono) 10%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tono) 22%, transparent);
+  }
+  .chico {
+    min-height: 22px;
+    gap: 6px;
+    padding: 2px 9px 2px 7px;
+    font-size: 12px;
+    line-height: 16px;
   }
   .punto {
     flex-shrink: 0;
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: currentColor;
+    background: var(--tono);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tono) 22%, transparent);
   }
-  .desconectado .punto {
-    background: var(--texto-3);
+  .chico .punto {
+    width: 6px;
+    height: 6px;
+    box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--tono) 22%, transparent);
   }
 
   .conectado {
+    --tono: var(--exito);
     color: var(--exito);
-    background: color-mix(in srgb, var(--exito) 14%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--exito) 30%, transparent);
   }
-
   .conectando,
   .desconectando {
+    --tono: var(--primario);
     color: var(--primario-texto);
-    background: color-mix(in srgb, var(--primario) 12%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primario) 30%, transparent);
   }
   .conectando .punto,
   .desconectando .punto {

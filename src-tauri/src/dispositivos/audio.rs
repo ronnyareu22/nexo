@@ -4,7 +4,7 @@
 //!   Bluetooth con su dirección (por ejemplo `E8-9E-13-61-CE-B7:output`), así se une con la lista de Bluetooth.
 //! - Por UID (página Audio): todos los aparatos de sonido del sistema, no solo Bluetooth.
 //!
-//! Mac: CoreAudio. Windows: pendiente.
+//! Mac: CoreAudio. Windows: WASAPI e IPolicyConfig (en `audio_windows.rs`).
 
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +23,7 @@ pub struct Sonido {
 /// Un aparato de sonido del sistema (integrado, Bluetooth, USB, HDMI…), para la página Audio.
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 pub struct DispositivoAudio {
     /// Identificador estable del sistema (por ejemplo `BuiltInSpeakerDevice`).
     pub uid: String,
@@ -54,24 +54,31 @@ pub enum Cambio {
 #[cfg(target_os = "macos")]
 pub use mac::{ajustar, ajustar_por_uid, estado, listar};
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+#[path = "audio_windows.rs"]
+mod sistema;
+#[cfg(windows)]
+pub use sistema::{ajustar, ajustar_por_uid, estado, listar};
+
+// En otros sistemas no hay sonido que controlar.
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn estado(_direccion: &str) -> Result<Sonido, String> {
     Ok(Sonido::default())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn ajustar(_direccion: &str, _cambio: Cambio) -> Result<(), String> {
-    Err("Todavía no disponible en Windows".into())
+    Err("No disponible en este sistema".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn listar() -> Vec<DispositivoAudio> {
     Vec::new()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn ajustar_por_uid(_uid: &str, _cambio: Cambio) -> Result<(), String> {
-    Err("Todavía no disponible en Windows".into())
+    Err("No disponible en este sistema".into())
 }
 
 #[cfg(target_os = "macos")]

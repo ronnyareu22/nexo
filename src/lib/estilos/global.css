@@ -34,6 +34,10 @@
   --primario-hover: #00c9a0;
   --primario-texto: #00e6b8; /* turquesa legible como texto o ícono */
   --sobre-primario: #04241d; /* texto sobre el primario */
+  /* Botón principal: turquesa profundo con texto blanco (el texto oscuro sobre turquesa se veía mal). */
+  --boton-fondo: linear-gradient(180deg, #00A688, #00876D);
+  --boton-fondo-hover: linear-gradient(180deg, #009A7E, #007A62);
+  --boton-texto: #ffffff;
 
   /* Estados */
   --exito: #22c55e;
@@ -109,6 +113,8 @@
 
   /* Logo */
   --canto: linear-gradient(135deg, #5cf2d4, var(--primario) 50%, #00a383);
+  /* Degradado de marca (guía de marca): turquesa, cian y azul. Solo en detalles de marca, nunca en superficies grandes. */
+  --degradado-marca: linear-gradient(180deg, #3ef3d3, #22c6f0 52%, #2f6cf4);
 
   /* Forma */
   --radio-xl: 26px;
@@ -125,6 +131,36 @@
   --dur-vista: 220ms;
   --rapido: 160ms cubic-bezier(0.2, 0.7, 0.2, 1);
   --resorte: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Capas de las tarjetas: relleno con un degradado vertical muy leve (más claro arriba), una línea de luz
+     de 1 px por dentro arriba, borde fino y sombra suave. Todo sólido: nada deja ver lo de atrás. */
+  --superficie-tope: #182030;
+  --superficie-base: #131925;
+  --superficie-inserto: #19212e; /* grupos y datos dentro de una tarjeta */
+  --borde-tarjeta: #1b2431; /* "Border" de la guía de marca: el canto de las tarjetas, por fuera */
+  --luz-tope: rgb(255 255 255 / 0.06);
+  --sombra-tarjeta: 0 1px 1px rgb(0 0 0 / 0.28), 0 12px 28px -18px rgb(0 0 0 / 0.75);
+  --relleno-tarjeta: linear-gradient(180deg, var(--superficie-tope), var(--superficie-base));
+  --sombra-apoyo: rgb(0 0 0 / 0.5); /* sombra bajo la foto de un aparato */
+
+  /* Escala de letra (DISENO.md 4.2). Se usa con `font:`; los números van luego con tabular-nums. */
+  --letra-portada: 700 32px/38px var(--fuente);
+  --letra-titulo: 700 26px/32px var(--fuente);
+  --letra-seccion: 700 20px/26px var(--fuente);
+  --letra-panel: 650 15px/22px var(--fuente);
+  --letra-cuerpo: 400 14px/21px var(--fuente);
+  --letra-pequena: 400 12.5px/18px var(--fuente);
+  --letra-rotulo: 600 11px/16px var(--fuente);
+
+  /* Espacios: ritmo de 8, con 4 y 12 para ajustes finos. */
+  --e-1: 4px;
+  --e-2: 8px;
+  --e-3: 12px;
+  --e-4: 16px;
+  --e-5: 20px;
+  --e-6: 24px;
+  --e-8: 32px;
+  --e-10: 40px;
 }
 
 /* ---------- Claro: elegido en la app, o del sistema si no se eligió oscuro ---------- */
@@ -159,6 +195,14 @@
   --aurora-1: rgb(0 184 148 / 0.16);
   --aurora-2: rgb(59 130 246 / 0.12);
   --aurora-3: rgb(56 189 248 / 0.12);
+  --superficie-tope: #ffffff;
+  --superficie-base: #fbfcfe;
+  --superficie-inserto: #f5f7fb;
+  --borde-tarjeta: rgb(15 23 42 / 0.075);
+  --luz-tope: rgb(255 255 255 / 0);
+  --sombra-apoyo: rgb(15 23 42 / 0.16);
+  --sombra-tarjeta: 0 1px 2px rgb(15 23 42 / 0.04), 0 3px 8px -3px rgb(15 23 42 / 0.05),
+    0 16px 32px -20px rgb(15 23 42 / 0.16);
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
@@ -192,6 +236,14 @@
     --aurora-1: rgb(0 184 148 / 0.16);
     --aurora-2: rgb(59 130 246 / 0.12);
     --aurora-3: rgb(56 189 248 / 0.12);
+    --superficie-tope: #ffffff;
+    --superficie-base: #fbfcfe;
+    --superficie-inserto: #f5f7fb;
+    --borde-tarjeta: rgb(15 23 42 / 0.075);
+    --luz-tope: rgb(255 255 255 / 0);
+    --sombra-apoyo: rgb(15 23 42 / 0.16);
+    --sombra-tarjeta: 0 1px 2px rgb(15 23 42 / 0.04), 0 3px 8px -3px rgb(15 23 42 / 0.05),
+      0 16px 32px -20px rgb(15 23 42 / 0.16);
   }
 }
 
@@ -202,6 +254,7 @@
   [data-theme],
   :root:not([data-theme='dark']) {
     --borde: color-mix(in srgb, var(--texto) 32%, transparent);
+    --borde-tarjeta: var(--borde);
     --texto-3: var(--texto-2);
   }
 }
@@ -249,14 +302,189 @@ button:focus-visible,
   color: var(--texto-3);
 }
 
-/* Panel estándar (el nombre "vidrio" se queda porque lo usan muchos componentes):
-   superficie sólida, borde fino y una sombra casi invisible. El borde va por dentro para no mover nada. */
-.vidrio {
+/* Panel estándar (el nombre "vidrio" se queda porque lo usan muchos componentes; `.lamina` es el nombre nuevo):
+   relleno sólido con un degradado muy leve, la línea de luz arriba, el canto fino por fuera (es una sombra:
+   no mueve nada) y la sombra en capas del tema. */
+.vidrio,
+.lamina {
   position: relative;
-  background: var(--superficie);
+  background: var(--relleno-tarjeta);
   box-shadow:
-    inset 0 0 0 1px var(--borde),
-    var(--sombra-panel);
+    inset 0 1px 0 var(--luz-tope),
+    0 0 0 1px var(--borde-tarjeta),
+    var(--sombra-tarjeta);
+}
+
+/* Cabecera de una tarjeta: ficha con el ícono, título y una línea de ayuda; a la derecha, lo que haga falta. */
+.t-cabeza {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+}
+.t-textos {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.t-titulo {
+  margin: 0;
+  font: var(--letra-panel);
+  letter-spacing: -0.01em;
+  color: var(--texto);
+}
+.t-sub {
+  margin: 0;
+  font: var(--letra-pequena);
+  color: var(--texto-2);
+  overflow-wrap: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ficha del ícono: cuadrado redondeado con el tono de su familia (--tono) muy suave detrás. */
+.ficha-icono {
+  --tono: var(--primario);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  color: var(--tono);
+  background: color-mix(in srgb, var(--tono) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tono) 20%, transparent);
+}
+.ficha-icono.chica {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+.ficha-icono.tenue {
+  --tono: var(--texto-3);
+}
+
+/* Grupo de filas dentro de una tarjeta (como los ajustes de macOS): fondo apenas distinto y separadores finos. */
+.inserto {
+  border-radius: var(--radio-md);
+  background: var(--superficie-inserto);
+  box-shadow: inset 0 0 0 1px var(--borde);
+}
+
+/* Barra de acciones (Desconectar · Renombrar · Olvidar): un solo bloque partido en botones parejos,
+   con el ícono encima del texto, como una barra de herramientas nativa. Cada botón mide al menos su palabra
+   más larga: las palabras nunca se parten ni se cortan. */
+.barra-acciones {
+  display: grid;
+  grid-auto-columns: minmax(min-content, 1fr);
+  grid-auto-flow: column;
+  padding: 1px;
+  border-radius: 16px;
+  background: var(--superficie-inserto);
+  box-shadow: inset 0 0 0 1px var(--borde);
+}
+.barra-acciones > button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 62px;
+  padding: 10px 8px 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--texto);
+  font-size: 12.5px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-align: center;
+  transition:
+    background-color var(--dur-color) ease,
+    color var(--dur-color) ease;
+}
+.barra-acciones > button + button {
+  box-shadow: inset 1px 0 0 var(--borde);
+}
+.barra-acciones > button:first-child {
+  border-radius: 15px 0 0 15px;
+}
+.barra-acciones > button:last-child {
+  border-radius: 0 15px 15px 0;
+}
+.barra-acciones > button > svg {
+  flex-shrink: 0;
+}
+.barra-acciones > button:hover:not(:disabled) {
+  background: var(--superficie-hover);
+}
+.barra-acciones > button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.barra-acciones > button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--primario);
+}
+/* Mientras conecta o desconecta: queda quieto y tenue, con el indicador girando en lugar del ícono. */
+.barra-acciones > button:disabled {
+  color: var(--texto-3);
+  cursor: progress;
+}
+.barra-acciones > button.peligro {
+  color: var(--error);
+}
+.barra-acciones > button.primaria {
+  color: var(--primario-texto);
+}
+
+/* Indicador de carga: un aro que gira (solo mientras algo carga). */
+.girador {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: currentColor;
+  animation: girador 800ms linear infinite;
+}
+@keyframes girador {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Pila chica con su nivel (--nivel en %, --tono del color). */
+.mini-bateria {
+  --tono: var(--exito);
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 22px;
+  height: 11px;
+  margin-right: 2px;
+  padding: 1.5px;
+  border-radius: 3.5px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--texto-2) 70%, transparent);
+  vertical-align: -1px;
+}
+.mini-bateria::before {
+  content: '';
+  display: block;
+  width: var(--nivel, 100%);
+  height: 100%;
+  border-radius: 2px;
+  background: var(--tono);
+}
+.mini-bateria::after {
+  content: '';
+  position: absolute;
+  top: 3.5px;
+  right: -2.5px;
+  width: 1.5px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: color-mix(in srgb, var(--texto-2) 70%, transparent);
 }
 
 /* Lo que flota sobre el contenido (menús, tooltip): superficie elevada sólida y una sola sombra suave. */
@@ -292,14 +520,17 @@ button:focus-visible,
   padding: 0 16px;
   border: 0;
   border-radius: var(--radio-sm);
-  background: var(--primario);
-  color: var(--sobre-primario);
+  background: var(--boton-fondo);
+  color: var(--boton-texto);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.16),
+    0 1px 2px rgb(0 0 0 / 0.14);
   font-size: 13px;
   font-weight: 650;
   transition: background-color var(--dur-color) ease;
 }
 .boton-primario:hover:not(:disabled) {
-  background: var(--primario-hover);
+  background: var(--boton-fondo-hover);
 }
 
 /* Botón redondo de la barra de arriba (Actualizar, tema): superficie con borde; el hover solo cambia el color. */
@@ -310,9 +541,13 @@ button:focus-visible,
   width: 38px;
   height: 38px;
   padding: 0;
-  border: 1px solid var(--borde);
+  border: 0;
   border-radius: 50%;
-  background: var(--superficie);
+  background: var(--relleno-tarjeta);
+  box-shadow:
+    inset 0 1px 0 var(--luz-tope),
+    0 0 0 1px var(--borde-tarjeta),
+    var(--sombra-tarjeta);
   color: var(--texto-2);
   transition:
     background-color var(--dur-color) ease,

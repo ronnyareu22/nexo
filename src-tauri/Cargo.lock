@@ -2207,8 +2207,10 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 name = "nexo"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "ddc",
  "ddc-macos",
+ "libc",
  "objc2",
  "objc2-foundation",
  "serde",
@@ -2216,6 +2218,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",
+ "windows",
 ]
 
 [[package]]

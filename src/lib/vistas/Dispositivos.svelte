@@ -14,6 +14,7 @@
   import type { Dispositivo, Estado, Registro } from '$lib/tipos';
   import { nombreDe } from '$lib/tipos';
   import { abrirAjustesBluetooth, leerHistoriales, olvidarDispositivo, ponerAlias } from '$lib/api';
+  import { ajustesBluetoothTexto, textoAbrirBluetooth } from '$lib/api-sistema';
   import { ultimaVez } from '$lib/tiempo';
   import { tooltip } from '$lib/tooltip';
   import FilaDispositivo from '$lib/componentes/FilaDispositivo.svelte';
@@ -60,6 +61,7 @@
   });
 
   const dispositivos = $derived(estado?.dispositivos ?? []);
+  const conectados = $derived(dispositivos.filter((d) => d.conectado).length);
 
   /** Minúsculas y sin tildes, para que "beats" encuentre "Beats Solo³" y "telefono" a "Teléfono". */
   const normalizar = (t: string) => t.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
@@ -185,7 +187,7 @@
       await onactualizar?.();
     } catch (e) {
       onerror(String(e));
-      avisoOlvidar = { id: d.id, texto: 'Nexo no pudo olvidarlo. Puedes hacerlo desde Ajustes › Bluetooth.' };
+      avisoOlvidar = { id: d.id, texto: `Nexo no pudo olvidarlo. Puedes hacerlo desde ${ajustesBluetoothTexto}.` };
     }
   }
 
@@ -206,13 +208,13 @@
     <NexoBot expresion="bluetooth-apagado" tamano={150} />
     <h2>El Bluetooth está apagado</h2>
     <p>Enciéndelo para ver y conectar tus dispositivos.</p>
-    <button class="secundario" onclick={ajustesBluetooth}>Abrir Ajustes de Bluetooth</button>
+    <button class="secundario" onclick={ajustesBluetooth}>{textoAbrirBluetooth}</button>
   </div>
 {:else if estado && dispositivos.length === 0}
   <div class="vacio">
     <NexoBot expresion="sin-dispositivos" tamano={150} />
     <h2>Aún no hay dispositivos</h2>
-    <p>Empareja tus audífonos, teclado o mouse en Ajustes › Bluetooth y aparecerán aquí.</p>
+    <p>Empareja tus audífonos, teclado o mouse en {ajustesBluetoothTexto} y aparecerán aquí.</p>
     <button class="boton-primario" onclick={ajustesBluetooth}><Icono nombre="mas" tamano={16} /> Agregar dispositivo</button>
   </div>
 {:else if enPagina && elegido}
@@ -233,8 +235,16 @@
   <div class="dispositivos" class:angosta={angosta.current}>
     <div class="columna-lista">
       <header class="encabezado">
-        <h1>Mis dispositivos</h1>
-        <p>Gestiona tus dispositivos conectados</p>
+        <div class="encabezado__textos">
+          <h1>Mis dispositivos</h1>
+          <p>Gestiona tus dispositivos conectados</p>
+        </div>
+        {#if estado && dispositivos.length}
+          <span class="resumen" class:alguno={conectados > 0}>
+            <span class="punto" aria-hidden="true"></span>
+            {conectados} de {dispositivos.length} {conectados === 1 ? 'conectado' : 'conectados'}
+          </span>
+        {/if}
       </header>
 
       <div class="lista">
@@ -267,8 +277,12 @@
               <button class="secundario" onclick={() => (busqueda = '')}>Borrar búsqueda</button>
             </div>
           {/if}
-          <button class="agregar" onclick={ajustesBluetooth} use:tooltip={'El emparejamiento se hace en Ajustes › Bluetooth'}>
-            <Icono nombre="mas" tamano={18} /> Agregar dispositivo
+          <button class="agregar" onclick={ajustesBluetooth} use:tooltip={`El emparejamiento se hace en ${ajustesBluetoothTexto}`}>
+            <span class="ficha-icono chica"><Icono nombre="mas" tamano={17} /></span>
+            <span class="agregar__textos">
+              <span class="agregar__titulo">Agregar dispositivo</span>
+              <span class="agregar__sub">Se empareja en {ajustesBluetoothTexto}</span>
+            </span>
           </button>
         {/if}
       </div>
@@ -324,7 +338,7 @@
 <Dialogo
   abierto={olvidarAbierto}
   titulo={olvidando ? `¿Olvidar ${nombreDe(olvidando)}?` : 'Olvidar'}
-  descripcion="Tendrás que emparejarlo de nuevo desde Ajustes › Bluetooth."
+  descripcion={`Tendrás que emparejarlo de nuevo desde ${ajustesBluetoothTexto}.`}
   icono="papelera"
   tono="peligro"
   textoConfirmar="Olvidar"
@@ -352,20 +366,53 @@
   }
   .encabezado {
     flex-shrink: 0;
-    margin: 4px 0 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px 16px;
+    margin: 4px 0 20px;
+  }
+  .encabezado__textos {
+    min-width: 0;
   }
   h1 {
     margin: 0;
-    font-size: 26px;
-    line-height: 32px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font: var(--letra-titulo);
+    letter-spacing: -0.025em;
   }
   .encabezado p {
     margin: 4px 0 0;
-    font-size: 14px;
-    line-height: 21px;
+    font: var(--letra-cuerpo);
     color: var(--texto-2);
+  }
+  /* Resumen: cuántos hay conectados, con el punto verde si alguno lo está. */
+  .resumen {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding: 0 12px 0 10px;
+    border-radius: var(--radio-pildora);
+    background: var(--relleno-tarjeta);
+    box-shadow:
+      inset 0 1px 0 var(--luz-tope),
+      0 0 0 1px var(--borde-tarjeta),
+      var(--sombra-tarjeta);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--texto-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .resumen .punto {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--texto-3);
+  }
+  .resumen.alguno .punto {
+    background: var(--exito);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--exito) 22%, transparent);
   }
 
   .lista {
@@ -373,9 +420,9 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    /* Aire para que el anillo de foco y la presión de la tarjeta no queden cortados por el borde. */
-    margin: -4px;
-    padding: 4px 4px 8px;
+    /* Aire para que el anillo de foco, la sombra y la presión de la tarjeta no queden cortados por el borde. */
+    margin: -8px;
+    padding: 8px 8px 12px;
   }
   ul {
     display: grid;
@@ -397,27 +444,43 @@
     color: var(--texto-2);
     overflow-wrap: anywhere;
   }
+  /* Agregar: borde punteado, la ficha turquesa con el "+" y dónde se empareja. */
   .agregar {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 8px;
+    gap: 14px;
     width: 100%;
-    min-height: 52px;
+    min-height: 68px;
     margin-top: 12px;
-    border: 1px solid var(--borde);
-    border-radius: 18px;
-    background: var(--superficie);
+    padding: 12px 16px;
+    border: 1.5px dashed color-mix(in srgb, var(--texto-3) 45%, transparent);
+    border-radius: 20px;
+    background: transparent;
     color: var(--texto);
-    font-size: 14px;
-    font-weight: 600;
-    transition: background-color var(--dur-color) ease;
-  }
-  .agregar :global(svg) {
-    color: var(--primario-texto);
+    text-align: left;
+    transition:
+      background-color var(--dur-color) ease,
+      border-color var(--dur-color) ease;
   }
   .agregar:hover {
     background: var(--superficie-hover);
+    border-color: var(--elegido-borde);
+  }
+  .agregar__textos {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+  .agregar__titulo {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+  }
+  .agregar__sub {
+    font-size: 12.5px;
+    line-height: 17px;
+    color: var(--texto-2);
+    overflow-wrap: break-word;
   }
   .agregar:active {
     transform: scale(0.98);
@@ -434,11 +497,13 @@
     display: flex;
     align-items: center;
     gap: 16px;
-    height: 120px;
+    height: 116px;
     padding: 10px 14px;
-    border: 1px solid var(--borde);
-    border-radius: 18px;
-    background: var(--superficie);
+    border-radius: 20px;
+    background: var(--relleno-tarjeta);
+    box-shadow:
+      0 0 0 1px var(--borde-tarjeta),
+      var(--sombra-tarjeta);
   }
   .fila-cargando .foto {
     width: 92px;
@@ -462,9 +527,11 @@
   }
   .detalle-cargando {
     height: 100%;
-    border: 1px solid var(--borde);
     border-radius: var(--radio-lg);
-    background: var(--superficie);
+    background: var(--relleno-tarjeta);
+    box-shadow:
+      0 0 0 1px var(--borde-tarjeta),
+      var(--sombra-tarjeta);
   }
   .fila-cargando,
   .detalle-cargando {

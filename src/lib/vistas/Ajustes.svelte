@@ -1,8 +1,18 @@
-<!-- Ajustes: apariencia, arranque, permisos, historial y "Acerca de", en filas como los Ajustes del Sistema.
-     Mientras falte un permiso, se revisa cada 3 s para mostrar cuando ya está. -->
+<!-- Ajustes: apariencia, tu nombre, arranque, widget de escritorio, permisos, historial y "Acerca de", en filas como los
+     Ajustes del Sistema. Mientras falte un permiso, se revisa cada 3 s para mostrar cuando ya está. -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { abrirAjustesPrivacidad, borrarHistorial, esMac, leerArranque, leerPermisos, usarArranque } from '$lib/api-sistema';
+  import {
+    abrirAjustesPrivacidad,
+    borrarHistorial,
+    esMac,
+    guardarNombre,
+    leerArranque,
+    leerPermisos,
+    leerWidget,
+    usarArranque,
+    usarWidget,
+  } from '$lib/api-sistema';
   import type { Permisos, SeccionPrivacidad } from '$lib/tipos-sistema';
   import Icono from '$lib/componentes/Icono.svelte';
   import Interruptor from '$lib/componentes/Interruptor.svelte';
@@ -10,9 +20,45 @@
   import NexoBot from '$lib/componentes/NexoBot.svelte';
   import Dialogo from '$lib/componentes/Dialogo.svelte';
 
-  let { onerror }: { onerror: (texto: string) => void } = $props();
+  let {
+    nombre = '',
+    onnombre,
+    onerror,
+  }: {
+    /** El nombre con que Nexo saluda en Inicio. */
+    nombre?: string;
+    /** Se guardó un nombre nuevo (para que Inicio salude con él). */
+    onnombre?: (nombre: string) => void;
+    onerror: (texto: string) => void;
+  } = $props();
 
   const VERSION = '0.1.0';
+
+  // --- Tu nombre ---
+  let cambiandoNombre = $state(false);
+  let nombreNuevo = $state('');
+  let errorNombre = $state<string | null>(null);
+
+  function abrirNombre() {
+    nombreNuevo = nombre;
+    errorNombre = null;
+    cambiandoNombre = true;
+  }
+
+  async function confirmarNombre() {
+    const texto = nombreNuevo.trim();
+    if (!texto) {
+      errorNombre = 'Escribe tu nombre.';
+      return;
+    }
+    try {
+      const guardado = await guardarNombre(texto);
+      onnombre?.(guardado);
+      cambiandoNombre = false;
+    } catch (e) {
+      errorNombre = String(e);
+    }
+  }
 
   // --- Arranque ---
   let arranque = $state<boolean | null>(null);
@@ -27,6 +73,22 @@
       onerror(String(e));
     }
     cambiandoArranque = false;
+  }
+
+  // --- Widget de escritorio ---
+  let widget = $state<boolean | null>(null);
+  let cambiandoWidget = $state(false);
+
+  async function alternarWidget() {
+    if (widget === null) return;
+    cambiandoWidget = true;
+    try {
+      widget = await usarWidget(!widget);
+    } catch (e) {
+      onerror(String(e));
+      widget = await leerWidget().catch(() => widget);
+    }
+    cambiandoWidget = false;
   }
 
   // --- Permisos ---
@@ -59,6 +121,12 @@
         para: 'Para las teclas de brillo en el monitor bajo el mouse.',
         ...estadoDe(permisos.accesibilidad),
       });
+      lista.push({
+        seccion: 'pantalla',
+        nombre: 'Grabación de pantalla',
+        para: 'Para las capturas con Imprimir Pantalla desde tu PC.',
+        ...estadoDe(permisos.pantalla),
+      });
     }
     lista.push(
       {
@@ -67,14 +135,21 @@
         para: 'Para ver, conectar y desconectar tus aparatos.',
         ...estadoDe(permisos.bluetooth),
       },
-      // El sistema siempre lo da por concedido aunque estén apagadas: no se muestra un estado que no es cierto.
-      {
-        seccion: 'notificaciones',
-        nombre: 'Notificaciones',
-        para: 'Para el aviso de batería baja. Revisa que estén permitidas para Nexo.',
-        tono: null,
-        estado: null,
-      },
+      // En Mac llega el estado real. En Windows siempre llega concedido: no se muestra un estado que no es cierto.
+      esMac
+        ? {
+            seccion: 'notificaciones',
+            nombre: 'Notificaciones',
+            para: 'Para el aviso de batería baja.',
+            ...estadoDe(permisos.notificaciones),
+          }
+        : {
+            seccion: 'notificaciones',
+            nombre: 'Notificaciones',
+            para: 'Para el aviso de batería baja. Revisa que estén permitidas para Nexo.',
+            tono: null,
+            estado: null,
+          },
     );
     return lista;
   });
@@ -105,6 +180,14 @@
     leerArranque()
       .then((a) => (arranque = a))
       .catch((e) => onerror(String(e)));
+    leerWidget()
+      .then((w) => (widget = w))
+      .catch((e) => onerror(String(e)));
+    // El widget también se enciende o se apaga desde el ícono y desde el propio widget: al volver, se relee.
+    const alVolver = () => {
+      if (!cambiandoWidget) leerWidget().then((w) => (widget = w)).catch(() => {});
+    };
+    window.addEventListener('focus', alVolver);
 
     const leer = () =>
       leerPermisos()
@@ -114,7 +197,10 @@
     const intervalo = setInterval(() => {
       if (faltaAlguno && document.visibilityState === 'visible') leer();
     }, 3000);
-    return () => clearInterval(intervalo);
+    return () => {
+      clearInterval(intervalo);
+      window.removeEventListener('focus', alVolver);
+    };
   });
 </script>
 
@@ -140,6 +226,17 @@
         <h2 class="rotulo" id="ajustes-general">General</h2>
         <div class="fila">
           <div class="textos">
+            <div class="titulo">Tu nombre</div>
+            <div class="ayuda">
+              {nombre ? `Nexo te saluda como «${nombre}» en Inicio.` : 'Escríbelo para que Nexo te salude en Inicio.'}
+            </div>
+          </div>
+          <button class="boton-vidrio boton" type="button" aria-label="Cambiar tu nombre" onclick={abrirNombre}>
+            Cambiar
+          </button>
+        </div>
+        <div class="fila">
+          <div class="textos">
             <div class="titulo">Abrir Nexo al iniciar sesión</div>
             <div class="ayuda">
               {esMac ? 'Queda en la barra de menús, listo para usar.' : 'Queda en la bandeja, listo para usar.'}
@@ -151,6 +248,32 @@
               cargando={cambiandoArranque}
               etiqueta="Abrir Nexo al iniciar sesión"
               oncambio={alternarArranque}
+            />
+          {/if}
+        </div>
+        {#if esMac}
+          <!-- Los widgets nativos los agrega la persona desde macOS; aquí solo se explica cómo. -->
+          <div class="fila">
+            <div class="textos">
+              <div class="titulo">Widgets de Nexo</div>
+              <div class="ayuda">
+                Brillo, Audífonos y Resumen, junto al Calendario y el Clima. Para ponerlos: clic derecho en el escritorio ›
+                Editar widgets › busca «Nexo» y arrástralos.
+              </div>
+            </div>
+          </div>
+        {/if}
+        <div class="fila">
+          <div class="textos">
+            <div class="titulo">{esMac ? 'Tarjeta de Nexo en el escritorio' : 'Widget en el escritorio'}</div>
+            <div class="ayuda">Una tarjeta pequeña en el escritorio con tus audífonos, pantallas y Bluetooth.</div>
+          </div>
+          {#if widget !== null}
+            <Interruptor
+              encendido={widget}
+              cargando={cambiandoWidget}
+              etiqueta="Widget en el escritorio"
+              oncambio={alternarWidget}
             />
           {/if}
         </div>
@@ -223,6 +346,34 @@
     </div>
   </div>
 </div>
+
+<Dialogo
+  abierto={cambiandoNombre}
+  titulo="Tu nombre"
+  descripcion="Así te saludo en Inicio."
+  icono="editar"
+  textoConfirmar="Guardar"
+  onconfirmar={confirmarNombre}
+  oncancelar={() => (cambiandoNombre = false)}
+>
+  <input
+    class="campo"
+    type="text"
+    bind:value={nombreNuevo}
+    placeholder="Tu nombre"
+    aria-label="Tu nombre"
+    aria-invalid={!!errorNombre}
+    aria-describedby={errorNombre ? 'ajustes-error-nombre' : undefined}
+    maxlength="30"
+    autocomplete="given-name"
+    spellcheck="false"
+    oninput={() => (errorNombre = null)}
+    data-autofocus
+  />
+  {#if errorNombre}
+    <p class="error-campo" id="ajustes-error-nombre" role="alert">{errorNombre}</p>
+  {/if}
+</Dialogo>
 
 <Dialogo
   abierto={preguntando}
@@ -371,6 +522,35 @@
     font-weight: 500;
     color: var(--texto-2);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Campo del diálogo "Tu nombre" (va dentro de Dialogo, que está al final de <body>) */
+  .campo {
+    width: 100%;
+    height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--borde-fuerte);
+    border-radius: var(--radio-sm);
+    outline: none;
+    background: var(--superficie);
+    color: var(--texto);
+    font: inherit;
+    font-size: 14px;
+    user-select: text;
+    -webkit-user-select: text;
+    transition: border-color var(--dur-color) ease;
+  }
+  .campo:focus {
+    border-color: var(--primario);
+  }
+  .campo[aria-invalid='true'] {
+    border-color: var(--error);
+  }
+  .error-campo {
+    margin: 8px 2px 0;
+    font-size: 12.5px;
+    line-height: 18px;
+    color: var(--error);
   }
 
   /* Mientras llegan los permisos: una línea quieta del alto de una fila. */

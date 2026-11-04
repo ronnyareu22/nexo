@@ -224,11 +224,11 @@
     background: var(--superficie-hover);
   }
   .confirmar {
-    background: var(--primario);
-    color: var(--sobre-primario);
+    background: var(--boton-fondo);
+    color: var(--boton-texto);
   }
   .confirmar:hover {
-    background: var(--primario-hover);
+    background: var(--boton-fondo-hover);
   }
   .peligro .confirmar {
     background: var(--error);

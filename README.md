@@ -12,10 +12,11 @@ Tus dispositivos en un solo panel: audífonos y aparatos Bluetooth, monitores y 
 
 | Aparatos | Qué puedes hacer | Mac | Windows |
 |---|---|---|---|
-| Bluetooth (audífonos, teléfono, teclado…) | Ver si está conectado y su batería; conectar y desconectar | ✅ | pendiente |
-| Historial y automático | Desde cuándo está conectado, última vez usado, uso de hoy y de 7 días, estimación y gráfica de batería; usar para el sonido al conectarse; aviso de batería baja | ✅ | pendiente |
-| Sonido de audífonos y parlantes | Volumen, silencio, usarlos como salida; usar su micrófono y su volumen | ✅ | pendiente |
-| Pantallas | Brillo de la MacBook (DisplayServices) y de monitores externos (DDC/CI) | ✅ (externo sin probar) | pendiente |
+| Bluetooth (audífonos, teléfono, teclado…) | Ver si está conectado y su batería; conectar y desconectar | ✅ | escrito, sin probar |
+| Historial y automático | Desde cuándo está conectado, última vez usado, uso de hoy y de 7 días, estimación y gráfica de batería; usar para el sonido al conectarse; aviso de batería baja | ✅ | escrito, sin probar |
+| Sonido de audífonos y parlantes | Volumen, silencio, usarlos como salida; usar su micrófono y su volumen | ✅ | escrito, sin probar (WASAPI) |
+| Pantallas | Brillo de la MacBook (DisplayServices) y de monitores externos (DDC/CI); resolución y principal | ✅ (externo sin probar) | escrito, sin probar (DDC/CI y WMI) |
+| Widget de escritorio | Audífonos, pantallas, Bluetooth y estado; abre Nexo en su sección | ✅ | ✅ (sin probar) |
 | Teclas de brillo | Con el mouse sobre el monitor externo, las teclas de la Mac cambian ese monitor y aparece un aviso de vidrio | ✅ (sin probar) | — |
 | Luces (Wi-Fi o Bluetooth) | Encender, brillo, color | pendiente | pendiente |
 
@@ -70,7 +71,14 @@ pnpm check                         # revisa la interfaz
 
 Para ver solo el diseño en el navegador (con datos de ejemplo): `pnpm build && pnpm preview`. Con `?ver=<dirección>` se abre directo el detalle de un aparato.
 
-**Windows:** se compila en una PC con Windows con `pnpm tauri build`. Antes hay que instalar Rust con las herramientas de compilación de C++ de Visual Studio. El resultado es el instalador `.msi` o `.exe`.
+**Windows, desde la Mac** (instalador NSIS `.exe`): hace falta `brew install llvm lld nsis`, `rustup target add x86_64-pc-windows-msvc` y `cargo install --locked cargo-xwin`. Después:
+
+```
+export PATH=/opt/homebrew/opt/rustup/bin:/opt/homebrew/opt/llvm/bin:$HOME/.cargo/bin:$PATH
+pnpm tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis
+```
+
+El instalador queda en `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`. Para revisar sin compilar: `cargo xwin check --target x86_64-pc-windows-msvc`.
 
 ## Permisos en la Mac
 
@@ -79,7 +87,6 @@ Para ver solo el diseño en el navegador (con datos de ejemplo): `pnpm build && 
 
 ## Siguientes pasos
 
-1. Bluetooth en Windows (Windows.Devices.Bluetooth).
-2. Monitores por DDC/CI (crate `ddc-hi`): probar con el Steren de 27" en la oficina, con DDC/CI activado en su menú.
+1. Probar la versión Windows en el PC del trabajo: Bluetooth, sonido, y el Steren de 27" por DDC/CI (activado en su menú).
 3. Luces: según la barra que se compre (Yeelight por LAN, Tuya, Govee o Bluetooth).
 4. Escenas ("Trabajo", "Noche"), automatizaciones y control hablado con Claude.

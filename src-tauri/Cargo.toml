@@ -21,11 +21,51 @@ tauri-plugin-notification = "2"
 
 # Mac: Bluetooth del sistema (IOBluetooth) para conectar y desconectar.
 # Mac: monitores externos por DDC/CI (también en chips Apple).
+# Mac: bloques de Objective-C (block2) para las respuestas del permiso de notificaciones.
+# Mac: libc para libproc (la sesión de RustDesk) y la hora local (nombre de las capturas). Ya venía con Tauri.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+block2 = "0.6"
 objc2-foundation = "0.3"
 ddc = "0.2"
 ddc-macos = "0.2"
+libc = "0.2"
+
+# Windows: Bluetooth, sonido (WASAPI), monitores (DDC/CI), pantallas y registro.
+# Misma versión del crate `windows` que ya usa Tauri, para no compilarlo dos veces.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Devices_Bluetooth",
+  "Devices_Enumeration",
+  "Devices_Radios",
+  "Win32_Foundation",
+  "Win32_Devices_Bluetooth",
+  "Win32_Devices_DeviceAndDriverInstallation",
+  "Win32_Devices_Display",
+  "Win32_Devices_FunctionDiscovery",
+  "Win32_Devices_Properties",
+  "Win32_Graphics_Gdi",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_Media_KernelStreaming",
+  "Win32_Security",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Ole",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+  "Win32_System_Wmi",
+  "Win32_UI_Accessibility",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 # App final lo más liviana posible: https://tauri.app/concept/size/
 [profile.release]

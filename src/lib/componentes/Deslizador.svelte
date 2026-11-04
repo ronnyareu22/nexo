@@ -26,7 +26,7 @@
   value={valor}
   aria-label={etiqueta}
   class:apagado
-  style:--lleno="{valor}%"
+  style:--parte={valor / 100}
   style:--relleno="var(--{color})"
   oninput={(e) => oncambio(Number(e.currentTarget.value))}
   onpointerdown={() => ontocando?.(true)}
@@ -36,16 +36,19 @@
 
 <style>
   input {
+    --lleno: calc(10px + (100% - 20px) * var(--parte));
     -webkit-appearance: none;
     appearance: none;
+    display: block;
     width: 100%;
-    height: 26px;
+    height: 24px;
     margin: 0;
     background: transparent;
     cursor: pointer;
   }
+  /* El relleno llega al centro de la perilla (20 px): nunca asoma pista vacía debajo de ella. */
   input::-webkit-slider-runnable-track {
-    height: 8px;
+    height: 6px;
     border-radius: 99px;
     background:
       linear-gradient(var(--relleno), var(--relleno)) 0 0 / var(--lleno) 100% no-repeat,
@@ -59,14 +62,15 @@
   }
   input::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     margin-top: -7px;
     border-radius: 50%;
     background: #ffffff;
     box-shadow:
-      0 1px 4px rgb(0 0 0 / 0.3),
-      0 0 0 0.5px rgb(0 0 0 / 0.08);
+      0 0 0 0.5px rgb(0 0 0 / 0.14),
+      0 1px 2px rgb(0 0 0 / 0.2),
+      0 3px 8px -2px rgb(0 0 0 / 0.28);
   }
   input:focus-visible {
     outline: none;

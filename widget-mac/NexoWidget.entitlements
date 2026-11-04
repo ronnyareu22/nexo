@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Los widgets de macOS deben ir en sandbox. -->
+  <key>com.apple.security.app-sandbox</key><true/>
+  <!-- Solo puede leer la carpeta de Nexo, donde está estado-widget.json. -->
+  <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+  <array><string>/Library/Application Support/com.ronny.nexo/</string></array>
+</dict>
+</plist>

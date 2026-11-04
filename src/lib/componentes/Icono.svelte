@@ -38,7 +38,14 @@
     | 'info'
     | 'opciones'
     | 'onda'
-    | 'check-circulo';
+    | 'check-circulo'
+    | 'remoto'
+    | 'portatil'
+    | 'captura'
+    | 'carpeta'
+    | 'portapapeles'
+    | 'copiar'
+    | 'flecha';
 </script>
 
 <script lang="ts">
@@ -177,5 +184,28 @@
   {:else if nombre === 'check-circulo'}
     <circle cx="12" cy="12" r="8.5" />
     <path d="M8.3 12.2l2.5 2.5 5-5.2" />
+  {:else if nombre === 'remoto'}
+    <!-- Dos pantallas, una detrás de la otra (compartir pantalla) -->
+    <rect x="2.5" y="8" width="13.5" height="9.5" rx="1.8" />
+    <path d="M9.25 17.5v3M6.5 20.5h5.5" />
+    <path d="M8 5.5v-.7A1.8 1.8 0 0 1 9.8 3h9.9a1.8 1.8 0 0 1 1.8 1.8v6.9a1.8 1.8 0 0 1-1.8 1.8H18.5" />
+  {:else if nombre === 'portatil'}
+    <rect x="4.5" y="5" width="15" height="10.5" rx="1.6" />
+    <path d="M2.5 18.5h19" />
+  {:else if nombre === 'captura'}
+    <!-- Esquinas de una selección y una cruz al centro -->
+    <path d="M4 8.5V6a2 2 0 0 1 2-2h2.5M15.5 4H18a2 2 0 0 1 2 2v2.5M20 15.5V18a2 2 0 0 1-2 2h-2.5M8.5 20H6a2 2 0 0 1-2-2v-2.5" />
+    <path d="M9.5 12h5M12 9.5v5" />
+  {:else if nombre === 'carpeta'}
+    <path d="M3.5 7.2A1.7 1.7 0 0 1 5.2 5.5h3.9l2 2.2h7.7a1.7 1.7 0 0 1 1.7 1.7v8.4a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7z" />
+  {:else if nombre === 'portapapeles'}
+    <rect x="5" y="4.5" width="14" height="16.5" rx="2" />
+    <rect x="9" y="2.75" width="6" height="3.5" rx="1.2" />
+    <path d="M8.5 11h7M8.5 15h5" />
+  {:else if nombre === 'copiar'}
+    <rect x="8.5" y="8.5" width="12" height="12" rx="2.2" />
+    <path d="M15.5 8.5V5.7a2.2 2.2 0 0 0-2.2-2.2H5.7a2.2 2.2 0 0 0-2.2 2.2v7.6a2.2 2.2 0 0 0 2.2 2.2h2.8" />
+  {:else if nombre === 'flecha'}
+    <path d="M4.5 12h15M13.5 6l6 6-6 6" />
   {/if}
 </svg>

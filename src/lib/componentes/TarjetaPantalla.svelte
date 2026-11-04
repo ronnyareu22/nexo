@@ -7,6 +7,7 @@
   import { enviadorDelUltimo } from '$lib/enviador';
   import type { Pantalla } from '$lib/tipos';
   import type { ModoPantalla } from '$lib/tipos-sistema';
+  import { fotoDePantalla } from '$lib/catalogo';
   import Ilustracion from './Ilustracion.svelte';
   import Deslizador from './Deslizador.svelte';
   import Icono from './Icono.svelte';
@@ -112,7 +113,13 @@
 
 <article class="tarjeta vidrio" aria-label={p.nombre}>
   <div class="escenario">
-    <div class="figura"><Ilustracion tipo={p.interna ? 'portatil' : 'monitor'} encendido={p.controlable} /></div>
+    <div class="figura">
+      {#if fotoDePantalla(p)}
+        <img src={fotoDePantalla(p)} alt="" draggable="false" />
+      {:else}
+        <Ilustracion tipo={p.interna ? 'portatil' : 'monitor'} encendido={p.controlable} />
+      {/if}
+    </div>
   </div>
 
   <div class="identidad">
@@ -218,6 +225,11 @@
   .figura {
     width: 132px;
     height: 132px;
+  }
+  .figura img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
 
   .identidad {

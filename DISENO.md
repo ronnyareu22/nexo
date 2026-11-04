@@ -64,6 +64,16 @@ src-tauri/src/
 
 **Inspiración:** macOS Tahoe, Apple Home, la hoja de ajustes de los AirPods y apps profesionales minimalistas. **Superficies sólidas**: sin vidrio, sin transparencias y sin desenfoque (el dueño rechazó el liquid glass el 3 nov).
 
+**Marca (guía del dueño, 3 nov 2026):** `~/Downloads/Guía de Marca Nexo con Robot Mascota.png`.
+- **Logo:** la "N" de cinta, con degradado turquesa #3EF3D3 → cian #22C6F0 → azul #2F6CF4.
+  - Se genera en vector con `diseno/marca/generar-logo.mjs`, a partir de la silueta medida de la guía, simétrico y con puntas finas.
+  - Salidas: `logo-n.svg`, `logo-n-mono.svg` (barra de menús), `icono-app.svg` / `icono-app-1024.png` (de ahí salen los íconos con `pnpm tauri icon`) y el componente `src/lib/componentes/LogoNexo.svelte`.
+  - Al lado de la N, la palabra "Nexo" en Inter 600–700.
+- **Lema:** "Conecta. Controla. Trabaja mejor."
+- **Mascota:** "Tu asistente inteligente para conectar y controlar tus dispositivos."
+- **Colores de la guía:** Primary #00E6B8, Primary Hover #00C9A0, Accent Blue #3B82F6, Success #22C55E, Dark BG #0B0F14, Surface #141A26, Border #1B2431, Text #E5EAF0.
+- **Qué evitar:** deformar, rotar o cambiar los colores del logo, y ponerlo sobre fondos de bajo contraste.
+
 **Debe transmitir:** elegancia, tecnología, simplicidad, precisión y personalización.
 
 **Prohibido:**
@@ -165,7 +175,7 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
 **Barra de arriba (en todas las secciones):** a la izquierda, el buscador global "Buscar dispositivos…" con la tecla ⌘K (Ctrl K en Windows); escribir lleva a Dispositivos. A la derecha, en este orden: Actualizar y el botón de tema (sol en claro, luna en oscuro). El estado del Bluetooth va en una tarjeta al pie de la barra lateral ("Bluetooth activo · Todo en perfecto estado").
 
 1. **Inicio**
-   - "Hola, Ronny 👋", con el nombre tomado de la cuenta del sistema, y Nexo Bot saludando con la aurora detrás.
+   - "Hola, Ronny" (el nombre que la persona escribe en la bienvenida; **sin emojis en toda la app**, pedido del dueño el 3 nov), con Nexo Bot saludando y la aurora detrás.
    - Resumen en 4 bloques (KPIs): Audífonos, Pantallas, Bluetooth y Dispositivos. Cada uno lleva arriba el ícono de línea en celeste, el nombre y el valor en color (verde para estados, turquesa para cantidades). Teclado entra cuando llegue su fase.
    - Baterías y estado del Bluetooth.
    - Atajos frecuentes.
@@ -192,11 +202,23 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
 4. **Pantallas**
    - Cada pantalla con brillo, resolución, frecuencia, cuál es la principal y su posición.
    - El atajo de teclas de brillo.
-5. **Automatizaciones**
+5. **Remoto** (hecho el 3 nov; el dueño controla la Mac desde la PC del trabajo con RustDesk por Tailscale)
+   - **Estado:** quién está conectado, si va directo por Tailscale o por relé, y el estado de Tailscale y RustDesk.
+     - Mac: "Preparar para el trabajo" y "Abrir RustDesk".
+     - Windows: "Conectar a mi Mac" (`rustdesk --connect 100.88.188.99`).
+   - **Atajos de Windows en la Mac** (`sistema/remoto/teclado.rs`): Ctrl → ⌘, Inicio/Fin, Alt+Tab, escritorios.
+     - Solo traduce lo que llega de RustDesk (el PID de origen del evento); el teclado de la Mac no cambia.
+     - En Windows, `sistema/remoto_windows.rs` atrapa lo que Windows se guarda (Win+Tab, Win+D, Ctrl+Win+←/→, Win+Shift+S, Alt+Tab, Win+E) y lo manda por su código de tecla. Requiere el modo de teclado "Mapa" de RustDesk.
+     - En Logi Options+ se asignan pulsaciones de teclas, no acciones prediseñadas.
+   - **Captura con Imprimir Pantalla** (F13 en la Mac): zona → PNG a 1x en el portapapeles y en Imágenes › Capturas remotas. Reemplaza a la app aparte "Captura remota".
+   - **Portapapeles liviano:** durante la sesión, las imágenes grandes se reducen a 1600 px antes de que RustDesk las mande. Historial de 12 copias, sin contraseñas.
+   - **Durante la sesión:** la Mac no se duerme (`caffeinate -s -w`) y el brillo baja al mínimo; al terminar, todo vuelve como estaba.
+   - **Permiso nuevo y obligatorio:** Grabación de pantalla.
+6. **Automatizaciones**
    - Reglas por aparato: "al conectar, usar para el sonido", "avisar con batería baja", "al conectar el monitor, poner brillo X".
    - Lista de reglas activas.
-6. **Widgets:** ver la sección 10.
-7. **Ajustes**
+7. **Widgets:** ver la sección 10.
+8. **Ajustes**
    - Tema.
    - Arranque al iniciar sesión.
    - Permisos: cuál tiene Nexo, cuál falta y un botón para abrirlo.
@@ -239,11 +261,36 @@ Barra lateral con: **Inicio · Dispositivos · Audio · Pantallas · Automatizac
 - **Atajos propios de Nexo**, por ejemplo "captura liviana para trabajar en remoto" (hoy es la app aparte "Captura remota"): en Mac con Carbon RegisterEventHotKey, sin permiso especial; en Windows con RegisterHotKey.
 - **Si algo pide un permiso** (Accesibilidad o administrador), se dice antes y no se simula.
 
+### 9.1 Plan para los aparatos del dueño: Logitech Wave Keys y MX Master 4 (3 nov)
+Se hace cuando los tenga, para probar con los aparatos reales. Nexo reemplaza a Logi Options+, que es pesado.
+- **Protocolo HID++ 2.0 de Logitech** (el mismo que usa Solaar), por Bluetooth o por el receptor Logi Bolt. En Mac va con IOHIDManager y en Windows con HID.
+  - Batería real de los dos (función 0x1004).
+  - **Easy-Switch desde Nexo** (0x1814): un botón "Pasar teclado y mouse a la PC" y otro "a la Mac", que cambian los dos aparatos a la vez.
+  - MX Master: DPI (0x2201) y SmartShift de la rueda (0x2111).
+- **Botones del MX Master 4 en la Mac**, con el tap de eventos (no hace falta HID++):
+  - Botón de gestos → Mission Control.
+  - Botones de atrás y adelante → cambiar de escritorio.
+  - Rueda del pulgar → desplazamiento horizontal.
+  - **Dirección del scroll del mouse independiente del trackpad**, algo que macOS no permite.
+- **Wave Keys:** perfil Mac/Windows y teclas multimedia. En la sesión remota se aplica la traducción del perfil Remoto.
+
 ## 10. Widgets y acceso rápido (obligatorio en Mac y en Windows)
 
 El dueño los quiere **en los dos sistemas**. Hay tres niveles, que se hacen en este orden:
 
+0. **Widget de escritorio de Nexo (hecho el 3 nov, Mac y Windows):** una tarjeta chica de 568×150 que vive en el escritorio. Tiene cuatro mosaicos: audífonos con su batería, pantallas en uso con su brillo, Bluetooth, y Nexo Bot con el estado general.
+   - Se mueve arrastrando y recuerda dónde quedó.
+   - Se prende y se apaga desde la bandeja ("Widget en el escritorio") y desde Ajustes; viene prendido.
+   - Cada mosaico abre Nexo en su sección.
+   - Se actualiza cada 30 s o cuando el vigía avisa un cambio.
+   - Archivos: `sistema/widget.rs` y `routes/widget`. Cuesta un webview más mientras está prendido.
+
 1. **Panel rápido** desde la barra de menús (Mac) o la bandeja (Windows): una ventanita sólida con baterías, salida de sonido, brillo y conectar o desconectar. Se crea al abrirla y se libera al cerrarla.
+1b. **Widgets nativos de macOS: hechos el 3 nov, sin Xcode** (`widget-mac/`, se compilan con `widget-mac/construir.sh` antes de `tauri build`).
+   - Cuatro widgets: Brillo (pequeño, con botones − y +), Brillo de tus pantallas (mediano), Audífonos (pequeño) y Resumen (mediano).
+   - Leen `estado-widget.json`, que escribe `sistema/widgets_mac.rs`. Los botones avisan a Nexo con notificaciones del sistema, `com.ronny.nexo.brillo.<0|1>.<bajar|subir>`.
+   - `Metadata.appintents` se escribe a mano (`metadatos.py`), porque no hay Xcode.
+   - En la Mac, la tarjeta propia viene apagada.
 2. **Widgets nativos del sistema** (los que se fijan en el escritorio o en el panel de widgets). Los dibuja el sistema, así que no gastan memoria de Nexo:
    - **macOS:** una extensión **WidgetKit** en Swift/SwiftUI dentro de `Nexo.app/Contents/PlugIns`. Nexo (Rust) escribe el estado en un JSON del **App Group** y el widget lo lee. Tamaños pequeño y mediano, con un toque que abre Nexo en ese aparato. Los botones interactivos (App Intents, macOS 14+) quedan para una segunda vuelta.
      - **Requisitos:** **Xcode completo** (hoy solo están las herramientas de línea de comandos) y firmar con un equipo de Apple, aunque sea el gratuito, por el entitlement de App Group.
@@ -292,8 +339,8 @@ El dueño los quiere **en los dos sistemas**. Hay tres niveles, que se hacen en 
 | 2 | Barra lateral, Inicio y Dispositivos (lista + panel de detalle) | ✅ Hecha (3 nov) |
 | 3 | Detalle de audífonos y página Audio (salida y entrada del sistema, alias, olvidar) | ✅ Hecha · falta probar Olvidar con un aparato real |
 | 4 | Pantallas: resolución, frecuencia, principal y distribución | Brillo, resolución, frecuencia y principal hechos · falta la distribución arrastrable y probar con el Steren |
-| 5 | Widgets: panel rápido, WidgetKit (Mac), proveedor de widgets (Windows), `estado.json` | Por empezar (pide instalar Xcode) |
-| 6 | Automatizaciones y Ajustes completos; versión Windows de lo anterior | Mac hecho · falta Windows |
+| 5 | Widgets: panel rápido, WidgetKit (Mac), proveedor de widgets (Windows), `estado.json` | Widget de escritorio propio hecho (Mac y Windows) · faltan los nativos (Xcode; MSIX en Windows) |
+| 6 | Automatizaciones y Ajustes completos; versión Windows de lo anterior | Mac hecho · Windows escrito el 3 nov (Bluetooth y sonido con WASAPI y KS, monitores por DDC/CI, WMI, modos, arranque) y compilado desde la Mac con cargo-xwin · falta probarlo en el PC del trabajo |
 | 7 | Accesibilidad, optimización, pruebas y firma estable | Por empezar |
 | Más adelante | Teclado y ratón: perfiles macOS y Windows, atajos, conflictos, reasignar | **Pospuesto por decisión del dueño** |
 

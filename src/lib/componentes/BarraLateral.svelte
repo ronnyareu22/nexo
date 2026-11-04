@@ -1,7 +1,9 @@
-<!-- Barra lateral compacta: la marca, las secciones con ícono y nombre (la elegida con el estilo de "lo elegido")
-     y, abajo, una tarjeta con el estado general sobre una aurora suave. Con la ventana angosta (menos de 900 px)
+<!-- Barra lateral compacta: la marca (la N de cinta de la guía de marca y "Nexo"), las secciones con ícono y nombre
+     (la elegida con el estilo de "lo elegido" y la rayita con el degradado de marca) y, abajo, una tarjeta con el
+     estado general sobre una aurora suave y el lema "Conecta. Controla. Trabaja mejor.". Con la ventana angosta (menos de 900 px)
      queda solo con íconos: los nombres y el estado pasan al tooltip y siguen ahí para los lectores de pantalla.
-     Arriba deja 52 px libres para arrastrar la ventana y para los botones de macOS. -->
+     Arriba deja 52 px libres para arrastrar la ventana y para los botones de macOS. En Windows la ventana
+     tiene su barra de título, así que deja solo 8 px y la marca queda a la altura del buscador. -->
 <script lang="ts" module>
   /** Estado general al pie: "Bluetooth activo" / "Todo en perfecto estado", o el problema. */
   export interface EstadoGeneral {
@@ -15,6 +17,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { tooltip } from '$lib/tooltip';
   import Icono, { type Nombre } from './Icono.svelte';
+  import LogoNexo from './LogoNexo.svelte';
 
   let {
     secciones,
@@ -35,7 +38,7 @@
 <nav class="lateral" aria-label="Secciones">
   <div class="arrastre" data-tauri-drag-region></div>
   <div class="marca" data-tauri-drag-region>
-    <span class="logo" aria-hidden="true"><span></span></span>
+    <span class="logo" aria-hidden="true"><LogoNexo tamano={30} etiqueta="" /></span>
     <span class="marca__nombre">Nexo</span>
   </div>
 
@@ -68,6 +71,7 @@
         <span class="estado__onda" aria-hidden="true"><Icono nombre="onda" tamano={18} /></span>
         <span class="estado__detalle">{estado.detalle}</span>
       </div>
+      <p class="lema">Conecta. Controla. Trabaja mejor.</p>
     </div>
   {/if}
 </nav>
@@ -82,8 +86,8 @@
     width: 220px;
     height: 100%;
     min-height: 0;
-    background: var(--superficie);
-    border-right: 1px solid var(--borde);
+    /* Un poco más clara arriba, como las tarjetas. Sin línea al borde: la separa el cambio de fondo. */
+    background: linear-gradient(180deg, var(--superficie-tope), var(--superficie) 40%, var(--superficie-base));
   }
   /* Aurora al pie, detrás de la tarjeta de estado: lomas de luz azul y turquesa que suben del borde.
      Solo degradados pintados una vez: sin desenfoque y sin animación. */
@@ -110,44 +114,44 @@
     height: 52px;
     flex-shrink: 0;
   }
+  /* Windows: sin los botones de macOS encima. Con 8 px, el centro de la marca (8 + 18) coincide con el
+     de la fila de arriba del panel (52 / 2). */
+  :global([data-plataforma='windows']) .arrastre {
+    height: 8px;
+  }
 
-  /* Marca: el anillo a la altura de los íconos de abajo (centro a 32 px). */
+  /* Marca: logo y "Nexo" centrados sobre el menú. */
   .marca {
     display: flex;
     align-items: center;
-    gap: 11px;
+    justify-content: center;
+    gap: 10px;
     flex-shrink: 0;
     height: 36px;
-    padding: 0 18px;
-    margin-bottom: 20px;
-    font-size: 19px;
+    padding: 0 20px 0 12px;
+    margin-bottom: 22px;
+    font-size: 20px;
     line-height: 24px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 650;
+    letter-spacing: -0.025em;
   }
   .logo {
-    position: relative;
+    display: flex;
     flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: var(--canto);
-  }
-  .logo span {
-    position: absolute;
-    inset: 7px;
-    border-radius: 50%;
-    background: var(--superficie);
   }
 
+  /* Menú centrado: todas las opciones del mismo ancho, en una columna al medio de la barra.
+     Dentro, ícono y nombre alineados a la izquierda para que los íconos queden en fila. */
   .nav {
     flex: 1;
     min-height: 0;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 196px);
+    justify-content: center;
+    align-content: start;
     gap: 4px;
     margin: 0;
-    padding: 0 10px;
+    padding: 0 12px;
     list-style: none;
     overflow-y: auto;
   }
@@ -159,13 +163,13 @@
     gap: 12px;
     width: 100%;
     min-height: 42px;
-    padding: 10px 12px;
-    border-width: 1px;
-    border-style: solid;
+    padding: 10px 16px;
+    border: 0;
     border-radius: var(--radio-sm);
-    font-size: 14.5px;
+    font-size: 14px;
     line-height: 20px;
     font-weight: 500;
+    letter-spacing: -0.005em;
     text-align: left;
     transition:
       background-color var(--dur-color) ease,
@@ -180,23 +184,23 @@
     background: transparent;
     color: var(--texto-2);
   }
+  .nav__op:not(.elegido) :global(svg) {
+    color: var(--texto-3);
+    transition: color var(--dur-color) ease;
+  }
+  .nav__op:not(.elegido):hover :global(svg) {
+    color: var(--texto-2);
+  }
   .nav__op:not(.elegido):hover {
     background: var(--superficie-hover);
     color: var(--texto);
   }
-  /* Lo elegido: el estilo global .elegido y una barrita turquesa a la izquierda. */
+  /* Lo elegido: una pastilla turquesa suave, sin bordes ni rayas. */
   .nav__op.elegido {
+    border: 0;
+    background: color-mix(in srgb, var(--primario) 14%, transparent);
+    color: var(--primario-texto);
     font-weight: 600;
-  }
-  .nav__op.elegido::before {
-    content: '';
-    position: absolute;
-    left: 3px;
-    top: 12px;
-    bottom: 12px;
-    width: 3px;
-    border-radius: 3px;
-    background: var(--primario);
   }
   /* Los nombres caben en 220 px; si algún día no, bajan de línea en vez de cortarse. */
   .nav__nombre {
@@ -206,20 +210,26 @@
 
   /* Tarjeta de estado: punto de color, título y detalle, y la onda a la derecha.
      El detalle pasa por debajo de la onda para que "Todo en perfecto estado" quepa en una línea. */
+  /* El pie, del mismo ancho que el menú y centrado como él. */
   .pie {
     flex-shrink: 0;
-    padding: 12px 10px 14px;
+    width: min(196px, calc(100% - 20px));
+    margin: 0 auto;
+    padding: 12px 0 16px;
   }
   .estado {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    column-gap: 9px;
+    column-gap: 10px;
     row-gap: 1px;
-    padding: 12px 14px;
-    border: 1px solid var(--borde);
-    border-radius: 14px;
-    background: var(--superficie-elevada);
+    padding: 12px 10px 12px 12px;
+    border-radius: 16px;
+    background: var(--relleno-tarjeta);
+    box-shadow:
+      inset 0 1px 0 var(--luz-tope),
+      0 0 0 1px var(--borde-tarjeta),
+      var(--sombra-tarjeta);
   }
   .punto {
     grid-row: 1 / 3;
@@ -251,6 +261,16 @@
     grid-row: 1;
     display: flex;
     color: var(--primario-texto);
+  }
+  /* El lema de la guía de marca, quieto y tenue debajo del estado. */
+  .lema {
+    margin: 10px 0 0;
+    text-align: center;
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--texto-3);
   }
   .estado__detalle {
     grid-column: 2 / 4;
@@ -288,7 +308,8 @@
       clip: rect(0 0 0 0);
       white-space: nowrap;
     }
-    .estado__onda {
+    .estado__onda,
+    .lema {
       display: none;
     }
     .pie {
@@ -298,8 +319,8 @@
       display: flex;
       justify-content: center;
       padding: 14px 0;
-      border-color: transparent;
       background: transparent;
+      box-shadow: none;
     }
   }
 </style>

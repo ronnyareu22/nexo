@@ -4,7 +4,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { leerAjustes, usarTeclasBrillo } from '$lib/api';
-  import { abrirAjustesPrivacidad } from '$lib/api-sistema';
+  import { abrirAjustesPrivacidad, esMac } from '$lib/api-sistema';
   import type { EstadoAjustes } from '$lib/tipos';
   import Interruptor from './Interruptor.svelte';
   import Icono from './Icono.svelte';
@@ -31,6 +31,7 @@
   }
 
   onMount(() => {
+    if (!esMac) return;
     const leer = () =>
       leerAjustes()
         .then((a) => (ajustes = a))
@@ -43,6 +44,9 @@
     return () => clearInterval(intervalo);
   });
 </script>
+
+<!-- Las teclas de brillo solo existen en la Mac; en Windows el brillo se cambia desde Nexo o el widget. -->
+{#if esMac}
 
 {#snippet contenido(a: EstadoAjustes)}
   <div class="fila">
@@ -83,6 +87,7 @@
       {@render contenido(ajustes)}
     </section>
   {/if}
+{/if}
 {/if}
 
 <style>

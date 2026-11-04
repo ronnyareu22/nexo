@@ -3,28 +3,78 @@
 //! - Vive en la barra de menús (Mac) o en la bandeja (Windows) con un ícono.
 //! - Clic en el ícono o doble clic en la app: abre el panel.
 //! - Al cerrar el panel se destruye su ventana para liberar memoria; la app sigue en segundo plano.
+//! - El widget de escritorio (sistema/widget.rs) vive aparte y abre el panel en la sección de cada casilla.
 
 mod dispositivos;
 mod sistema;
 
 use dispositivos::historial::{Evento, Historial};
 use dispositivos::pantallas::Pantallas;
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri_plugin_notification::NotificationExt;
 
 use tauri::{
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
     image::Image,
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-/// Abre el panel, o lo trae al frente si ya está abierto.
-fn abrir_panel(app: &AppHandle) {
+/// Las secciones del panel (las mismas de `src/routes/+page.svelte`).
+const SECCIONES: [&str; 7] = ["inicio", "dispositivos", "audio", "pantallas", "remoto", "automatizaciones", "ajustes"];
+
+/// Adónde abrir el panel: una sección y, en Dispositivos, la página de un aparato.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct Destino {
+    seccion: String,
+    dispositivo: Option<String>,
+}
+
+impl Destino {
+    /// Solo secciones conocidas; el aparato solo cuenta en Dispositivos.
+    fn nuevo(seccion: &str, dispositivo: Option<String>) -> Option<Self> {
+        if !SECCIONES.contains(&seccion) {
+            return None;
+        }
+        let dispositivo = dispositivo.filter(|d| seccion == "dispositivos" && !d.is_empty() && d.len() <= 200);
+        Some(Destino { seccion: seccion.into(), dispositivo })
+    }
+
+    /// La dirección con que se abre el panel: `/?seccion=…`, o `/?pagina=…` para la página de un aparato.
+    fn direccion(&self) -> String {
+        match &self.dispositivo {
+            Some(d) => format!("/?pagina={}", codificar(d)),
+            None => format!("/?seccion={}", self.seccion),
+        }
+    }
+}
+
+/// Deja pasar letras, números y `:-_.`; lo demás va en %XX (los id de Windows pueden traer `#` o `&`).
+fn codificar(texto: &str) -> String {
+    let mut salida = String::with_capacity(texto.len());
+    for b in texto.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b':' | b'-' | b'_' | b'.') {
+            salida.push(b as char);
+        } else {
+            salida.push_str(&format!("%{b:02X}"));
+        }
+    }
+    salida
+}
+
+/// Abre el panel, o lo trae al frente si ya está abierto. Con un destino, va a esa sección.
+fn abrir_panel(app: &AppHandle, destino: Option<Destino>) {
     if let Some(ventana) = app.get_webview_window("panel") {
+        let _ = ventana.unminimize();
         let _ = ventana.show();
         let _ = ventana.set_focus();
+        // El panel ya cargado cambia de sección solo (escucha "nexo-ir" en +page.svelte).
+        if let Some(d) = destino {
+            let _ = app.emit_to("panel", "nexo-ir", d);
+        }
         return;
     }
 
@@ -32,13 +82,18 @@ fn abrir_panel(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
-    let constructor = WebviewWindowBuilder::new(app, "panel", WebviewUrl::default())
+    let pagina = match &destino {
+        Some(d) => WebviewUrl::App(d.direccion().into()),
+        None => WebviewUrl::default(),
+    };
+    let constructor = WebviewWindowBuilder::new(app, "panel", pagina)
         .title("Nexo")
         .inner_size(1080.0, 720.0)
         .min_inner_size(780.0, 540.0)
         .center();
 
     // En Mac, la barra de título es transparente y el contenido llega hasta arriba.
+    // En Windows queda la barra de título normal del sistema.
     #[cfg(target_os = "macos")]
     let constructor = constructor
         .title_bar_style(tauri::TitleBarStyle::Overlay)
@@ -49,38 +104,74 @@ fn abrir_panel(app: &AppHandle) {
     }
 }
 
+/// Abre el panel (o lo trae al frente) en una sección; con `dispositivo`, en la página de ese aparato.
+/// Si la sección no es una conocida (por ejemplo, vacía), lo abre donde quedó. Lo usa el widget.
+#[tauri::command]
+async fn abrir_seccion(app: AppHandle, seccion: String, dispositivo: Option<String>) {
+    let destino = Destino::nuevo(&seccion, dispositivo);
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || abrir_panel(&a, destino));
+}
+
+/// Huella de lo que muestra el widget: si cambia, se le avisa para que se ponga al día.
+fn huella(estado: &dispositivos::Estado) -> String {
+    let mut h = format!("{}", estado.bluetooth_encendido);
+    for d in &estado.dispositivos {
+        h.push_str(&format!(
+            "|{}:{}:{:?}:{:?}:{:?}",
+            d.id, d.conectado, d.bateria, d.bateria_izquierda, d.bateria_derecha
+        ));
+    }
+    h
+}
+
 /// Vigía: cada 20 s mira qué está conectado, anota el historial y aplica los ajustes automáticos.
 fn iniciar_vigia(app: AppHandle, historial: Arc<Historial>) {
     std::thread::Builder::new()
         .name("nexo-vigia".into())
-        .spawn(move || loop {
-            if let Ok(estado) = dispositivos::listar_ahora() {
-                for evento in historial.registrar(&estado.dispositivos) {
-                    match evento {
-                        // macOS tarda un par de segundos en crear el sonido del aparato recién conectado.
-                        Evento::Conectado { id } if historial.automatico(&id).usar_salida_al_conectar => {
-                            std::thread::spawn(move || {
-                                for _ in 0..4 {
-                                    std::thread::sleep(Duration::from_millis(2500));
-                                    if dispositivos::usar_como_salida(&id).is_ok() {
-                                        break;
+        .spawn(move || {
+            let mut huella_anterior = String::new();
+            loop {
+                if let Ok(estado) = dispositivos::listar_ahora() {
+                    for evento in historial.registrar(&estado.dispositivos) {
+                        match evento {
+                            // macOS tarda un par de segundos en crear el sonido del aparato recién conectado.
+                            Evento::Conectado { id } if historial.automatico(&id).usar_salida_al_conectar => {
+                                std::thread::spawn(move || {
+                                    for _ in 0..4 {
+                                        std::thread::sleep(Duration::from_millis(2500));
+                                        if dispositivos::usar_como_salida(&id).is_ok() {
+                                            break;
+                                        }
                                     }
-                                }
-                            });
+                                });
+                            }
+                            Evento::BateriaBaja { nombre, nivel } => {
+                                let _ = app
+                                    .notification()
+                                    .builder()
+                                    .title("Batería baja")
+                                    .body(format!("A {nombre} le queda {nivel}%. Ponlo a cargar."))
+                                    .show();
+                            }
+                            _ => {}
                         }
-                        Evento::BateriaBaja { nombre, nivel } => {
-                            let _ = app
-                                .notification()
-                                .builder()
-                                .title("Batería baja")
-                                .body(format!("A {nombre} le queda {nivel}%. Ponlo a cargar."))
-                                .show();
+                    }
+                    // Widgets nativos de la Mac: el estado con los nombres que la persona les puso.
+                    let mut lista = estado.dispositivos.clone();
+                    historial.poner_alias_en(&mut lista);
+                    sistema::widgets_mac::actualizar(&app, estado.bluetooth_encendido, &lista);
+                    // El widget se pone al día cuando algo cambió, sin leer más seguido por su cuenta.
+                    let nueva = huella(&estado);
+                    if nueva != huella_anterior {
+                        if !huella_anterior.is_empty() {
+                            sistema::widget::avisar_cambio(&app);
                         }
-                        _ => {}
+                        huella_anterior = nueva;
                     }
                 }
+                std::thread::sleep(Duration::from_secs(20));
             }
-            std::thread::sleep(Duration::from_secs(20));
         })
         .expect("no se pudo iniciar el vigía");
 }
@@ -116,8 +207,25 @@ pub fn run() {
             sistema::nivel_aviso,
             sistema::permisos,
             sistema::abrir_ajustes_privacidad,
+            sistema::pedir_permiso,
+            sistema::leer_bienvenida,
+            sistema::guardar_nombre,
+            sistema::completar_bienvenida,
             sistema::arranque,
             sistema::usar_arranque,
+            sistema::widget_activo,
+            sistema::usar_widget,
+            sistema::remoto::remoto_estado,
+            sistema::remoto::remoto_ajustar,
+            sistema::remoto::remoto_preparar,
+            sistema::remoto::remoto_capturar,
+            sistema::remoto::remoto_abrir_rustdesk,
+            sistema::remoto::remoto_conectar_mac,
+            sistema::remoto::remoto_abrir_capturas,
+            sistema::remoto::portapapeles_historial,
+            sistema::remoto::portapapeles_copiar,
+            sistema::remoto::portapapeles_borrar,
+            abrir_seccion,
         ])
         .setup(|app| {
             // Pantallas: al cambiar el brillo con las teclas se muestra el aviso en ese monitor.
@@ -126,6 +234,8 @@ pub fn run() {
                 sistema::aviso::mostrar(&manejador, id, nivel)
             })));
             app.manage(pantallas.clone());
+            // Remoto (Mac): vigía de la sesión de RustDesk, atajos de Windows, captura con F13 y portapapeles liviano.
+            sistema::remoto::iniciar(app.handle());
             if sistema::ajustes::cargar(app.handle()).teclas_brillo && sistema::teclas::permiso_concedido() {
                 let _ = sistema::teclas::activar(pantallas, true);
             }
@@ -134,10 +244,21 @@ pub fn run() {
             let historial = Arc::new(Historial::cargar(app.handle()));
             app.manage(historial.clone());
             iniciar_vigia(app.handle().clone(), historial);
+            // Botones de brillo de los widgets nativos de la Mac.
+            sistema::widgets_mac::escuchar(app.handle().clone());
 
             let abrir = MenuItem::with_id(app, "abrir", "Abrir Nexo", true, None::<&str>)?;
+            let widget = CheckMenuItem::with_id(
+                app,
+                "widget",
+                "Widget en el escritorio",
+                true,
+                sistema::widget::activo(app.handle()),
+                None::<&str>,
+            )?;
             let salir = MenuItem::with_id(app, "salir", "Salir de Nexo", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&abrir, &salir])?;
+            let menu = Menu::with_items(app, &[&abrir, &widget, &salir])?;
+            app.manage(sistema::widget::CasillaBandeja(widget));
 
             TrayIconBuilder::with_id("nexo")
                 .icon(Image::from_bytes(include_bytes!("../icons/bandeja.png"))?)
@@ -146,7 +267,8 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, evento| match evento.id.as_ref() {
-                    "abrir" => abrir_panel(app),
+                    "abrir" => abrir_panel(app, None),
+                    "widget" => sistema::widget::alternar(app),
                     "salir" => app.exit(0),
                     _ => {}
                 })
@@ -157,27 +279,33 @@ pub fn run() {
                         ..
                     } = evento
                     {
-                        abrir_panel(icono.app_handle());
+                        abrir_panel(icono.app_handle(), None);
                     }
                 })
                 .build(app)?;
 
-            abrir_panel(app.handle());
+            abrir_panel(app.handle(), None);
+            sistema::widget::iniciar(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("no se pudo iniciar Nexo");
 
-    app.run(|app, evento| match evento {
-        // Se cerró el panel: la app no se cierra, solo queda el ícono (y sale del Dock).
-        RunEvent::ExitRequested { api, code: None, .. } => {
-            api.prevent_exit();
+    app.run(|app, evento| {
+        #[cfg(not(target_os = "macos"))]
+        let _ = app;
+        match evento {
+            // Se cerró la última ventana: la app no se cierra, solo queda el ícono.
+            RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
+            // Se cerró el panel: Nexo sale del Dock (el widget y el ícono siguen).
             #[cfg(target_os = "macos")]
-            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } if label == "panel" => {
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+            // Doble clic en la app cuando ya está corriendo.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => abrir_panel(app, None),
+            _ => {}
         }
-        // Doble clic en la app cuando ya está corriendo.
-        #[cfg(target_os = "macos")]
-        RunEvent::Reopen { .. } => abrir_panel(app),
-        _ => {}
     });
 }

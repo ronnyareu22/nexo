@@ -1,12 +1,35 @@
-// Llamadas a Rust para Pantallas y Ajustes: modos de pantalla, pantalla principal, permisos, arranque e historial.
+// Llamadas a Rust para Pantallas y Ajustes: modos de pantalla, pantalla principal, permisos, arranque, historial,
+// la bienvenida de la primera vez y el widget de escritorio (más los avisos entre el panel y el widget).
+// También Remoto: la sesión de RustDesk, los atajos de Windows, la captura liviana y el historial del portapapeles.
 // Fuera de la app (por ejemplo `pnpm preview` en el navegador) usa datos de ejemplo para ver el diseño.
 import { invoke } from '@tauri-apps/api/core';
-import type { ModoPantalla, Permisos, SeccionPrivacidad } from './tipos-sistema';
+import type {
+  AtajoRemoto,
+  Bienvenida,
+  CambioRemoto,
+  CapturaRemota,
+  DestinoPanel,
+  EntradaPortapapeles,
+  EstadoRemoto,
+  ModoPantalla,
+  Permisos,
+  Plataforma,
+  SeccionPrivacidad,
+} from './tipos-sistema';
+import type { Tema } from './tema';
 
 const enApp = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+const agente = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+
 /** Corre en macOS (los textos y algunas funciones cambian en Windows). */
-export const esMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
+export const esMac = /Mac/i.test(agente);
+
+/** El sistema: en Mac el contenido llega hasta arriba (botones de la ventana encima); en Windows hay barra de título. */
+export const plataforma: Plataforma = esMac ? 'mac' : /Windows/i.test(agente) ? 'windows' : 'otro';
+/** Dónde se empareja en cada sistema, para los textos de ayuda. */
+export const ajustesBluetoothTexto = esMac ? 'Ajustes › Bluetooth' : 'Configuración › Bluetooth';
+export const textoAbrirBluetooth = esMac ? 'Abrir Ajustes de Bluetooth' : 'Abrir Configuración de Bluetooth';
 
 /** Los modos de una pantalla (resolución y frecuencia), con el actual marcado. */
 export const modosPantalla = (id: number): Promise<ModoPantalla[]> =>
@@ -30,6 +53,41 @@ export const leerPermisos = (): Promise<Permisos> =>
 export const abrirAjustesPrivacidad = (seccion: SeccionPrivacidad): Promise<void> =>
   enApp ? invoke<void>('abrir_ajustes_privacidad', { seccion }) : Promise.resolve();
 
+/** Pide un permiso: muestra el aviso del sistema si aún no se preguntó, o abre su sección de Ajustes si se negó.
+ *  Devuelve cómo quedó al momento; si hay que activarlo en Ajustes, el cambio llega al volver a leer. */
+export const pedirPermiso = (clave: SeccionPrivacidad): Promise<Permisos> =>
+  enApp ? invoke<Permisos>('pedir_permiso', { clave }) : pedirPermisoEjemplo(clave);
+
+/** Los permisos sin los que Nexo no sigue: en Mac, todos; en Windows, ninguno (el sistema no los pide). */
+export const permisosRequeridos: SeccionPrivacidad[] =
+  plataforma === 'mac' ? ['bluetooth', 'accesibilidad', 'pantalla', 'notificaciones'] : [];
+
+/** Los permisos que solo dicen sí o no (se activan en Ajustes del Sistema, sin aviso de "permitir"). */
+export const permisoDeSiONo = (clave: SeccionPrivacidad): clave is 'accesibilidad' | 'pantalla' =>
+  clave === 'accesibilidad' || clave === 'pantalla';
+
+/** Si ese permiso ya está concedido. */
+export const permisoConcedido = (p: Permisos, clave: SeccionPrivacidad): boolean =>
+  permisoDeSiONo(clave) ? p[clave] : p[clave] === 'concedido';
+
+/** Los permisos obligatorios que todavía faltan. */
+export const permisosFaltantes = (p: Permisos): SeccionPrivacidad[] =>
+  permisosRequeridos.filter((clave) => !permisoConcedido(p, clave));
+
+// --- Bienvenida de la primera vez ---
+
+/** Si la bienvenida ya se hizo y el nombre para saludar (el guardado o el de la cuenta; puede venir vacío). */
+export const leerBienvenida = (): Promise<Bienvenida> =>
+  enApp ? invoke<Bienvenida>('leer_bienvenida') : Promise.resolve({ ...bienvenidaEjemplo });
+
+/** Guarda el nombre con que Nexo saluda. Devuelve cómo quedó; si está vacío, falla con "Escribe tu nombre.". */
+export const guardarNombre = (nombre: string): Promise<string> =>
+  enApp ? invoke<string>('guardar_nombre', { nombre }) : guardarNombreEjemplo(nombre);
+
+/** Marca la bienvenida como hecha: no vuelve a aparecer (salvo que falte un permiso). */
+export const completarBienvenida = (): Promise<void> =>
+  enApp ? invoke<void>('completar_bienvenida') : Promise.resolve(void (bienvenidaEjemplo.completa = true));
+
 /** Si Nexo se abre al iniciar sesión. */
 export const leerArranque = (): Promise<boolean> =>
   enApp ? invoke<boolean>('arranque') : Promise.resolve(arranqueEjemplo);
@@ -38,12 +96,143 @@ export const leerArranque = (): Promise<boolean> =>
 export const usarArranque = (activar: boolean): Promise<boolean> =>
   enApp ? invoke<boolean>('usar_arranque', { activar }) : Promise.resolve((arranqueEjemplo = activar));
 
+// --- Widget de escritorio ---
+
+/** Si el widget de escritorio está encendido. */
+export const leerWidget = (): Promise<boolean> =>
+  enApp ? invoke<boolean>('widget_activo') : Promise.resolve(widgetEjemplo);
+
+/** Enciende o apaga el widget de escritorio. Devuelve cómo quedó. */
+export const usarWidget = (activar: boolean): Promise<boolean> =>
+  enApp ? invoke<boolean>('usar_widget', { activar }) : Promise.resolve((widgetEjemplo = activar));
+
+/** Abre Nexo (o lo trae al frente) en una sección; con `dispositivo`, en la página de ese aparato. */
+export const abrirSeccion = (seccion: DestinoPanel['seccion'], dispositivo?: string): Promise<void> =>
+  enApp ? invoke<void>('abrir_seccion', { seccion, dispositivo: dispositivo ?? null }) : Promise.resolve();
+
+/** Abre Nexo donde quedó, sin cambiar de sección. */
+export const abrirNexo = (): Promise<void> =>
+  enApp ? invoke<void>('abrir_seccion', { seccion: '' }) : Promise.resolve();
+
+/** Empieza a arrastrar la ventana actual (el widget, cuando se arrastra desde una casilla). */
+export function moverVentana() {
+  if (!enApp) return;
+  import('@tauri-apps/api/window')
+    .then(({ getCurrentWindow }) => getCurrentWindow().startDragging())
+    .catch(() => {});
+}
+
+/** Escucha un aviso de Rust o de otra ventana. Devuelve con qué dejar de escuchar. Fuera de la app no hace nada. */
+function escuchar<T>(evento: string, alLlegar: (valor: T) => void): () => void {
+  if (!enApp) return () => {};
+  const quitar = import('@tauri-apps/api/event')
+    .then(({ listen }) => listen<T>(evento, (e) => alLlegar(e.payload)))
+    .catch(() => () => {});
+  return () => {
+    quitar.then((f) => f());
+  };
+}
+
+/** Panel: el widget pidió ir a una sección (Rust manda "nexo-ir" si el panel ya estaba abierto). */
+export const alPedirSeccion = (alLlegar: (destino: DestinoPanel) => void) => escuchar('nexo-ir', alLlegar);
+
+/** Widget: el vigía notó un cambio (se conectó algo, cambió una batería). */
+export const alCambiarDispositivos = (alLlegar: () => void) => escuchar<null>('widget-actualizar', () => alLlegar());
+
+/** Widget: se cambió el tema en el panel. */
+export const alCambiarTema = (alLlegar: (tema: Tema) => void) => escuchar('nexo-tema', alLlegar);
+
+/** Panel: le pasa al widget el tema recién elegido. */
+export function avisarTemaAlWidget(tema: Tema) {
+  if (!enApp) return;
+  import('@tauri-apps/api/event')
+    .then(({ emitTo }) => emitTo('widget', 'nexo-tema', tema))
+    .catch(() => {});
+}
+
+// --- Remoto (RustDesk por Tailscale) ---
+
+/** La sesión, Tailscale, RustDesk, los ajustes y la tabla de atajos. */
+export const leerRemoto = (): Promise<EstadoRemoto> =>
+  enApp ? invoke<EstadoRemoto>('remoto_estado') : Promise.resolve(copiaRemoto());
+
+/** Cambia uno o varios ajustes del remoto (o el modo trabajo). Devuelve cómo quedó todo. */
+export const ajustarRemoto = (cambio: CambioRemoto): Promise<EstadoRemoto> =>
+  enApp ? invoke<EstadoRemoto>('remoto_ajustar', { cambio }) : ajustarRemotoEjemplo(cambio);
+
+/** Mac: conecta Tailscale, abre RustDesk y enciende el modo trabajo. Puede tardar unos segundos. */
+export const prepararRemoto = (): Promise<EstadoRemoto> =>
+  enApp ? invoke<EstadoRemoto>('remoto_preparar') : prepararEjemplo();
+
+/** Mac: captura liviana a mano. null si se canceló con Esc. */
+export const capturarRemoto = (): Promise<CapturaRemota | null> =>
+  enApp ? invoke<CapturaRemota | null>('remoto_capturar') : capturaEjemplo();
+
+export const abrirRustDesk = (): Promise<void> => (enApp ? invoke<void>('remoto_abrir_rustdesk') : Promise.resolve());
+
+/** Windows: abre RustDesk ya conectándose a la Mac. */
+export const conectarMac = (): Promise<void> => (enApp ? invoke<void>('remoto_conectar_mac') : Promise.resolve());
+
+/** Mac: abre Imágenes › Capturas remotas. */
+export const abrirCapturas = (): Promise<void> => (enApp ? invoke<void>('remoto_abrir_capturas') : Promise.resolve());
+
+/** Empezó o terminó una sesión de RustDesk. */
+export const alCambiarRemoto = (alLlegar: () => void) => escuchar<unknown>('remoto-cambio', () => alLlegar());
+
+/** Se hizo una captura liviana (con Imprimir pantalla o con el botón). */
+export const alCapturar = (alLlegar: (c: CapturaRemota) => void) => escuchar('remoto-captura', alLlegar);
+
+/** Las últimas copias del portapapeles, de la más nueva a la más vieja. */
+export const leerPortapapeles = (): Promise<EntradaPortapapeles[]> =>
+  enApp ? invoke<EntradaPortapapeles[]>('portapapeles_historial') : Promise.resolve(portapapelesEjemplo.map((e) => ({ ...e })));
+
+/** Vuelve a poner esa copia en el portapapeles (y sube al principio). */
+export const copiarDelHistorial = (id: number): Promise<void> =>
+  enApp ? invoke<void>('portapapeles_copiar', { id }) : copiarEjemplo(id);
+
+/** Borra el historial del portapapeles. */
+export const borrarPortapapeles = (): Promise<void> =>
+  enApp ? invoke<void>('portapapeles_borrar') : Promise.resolve(void portapapelesEjemplo.splice(0));
+
+/** El historial del portapapeles cambió. */
+export const alCambiarPortapapeles = (alLlegar: () => void) =>
+  escuchar<unknown>('portapapeles-cambio', () => alLlegar());
+
 // --- Datos de ejemplo (solo fuera de la app) ---
 
 let arranqueEjemplo = true;
+let widgetEjemplo = true;
 
-// Como en el escritorio real: las notificaciones siempre llegan como concedidas (por eso Ajustes no muestra su estado).
-const permisosEjemplo: Permisos = { accesibilidad: true, bluetooth: 'concedido', notificaciones: 'concedido' };
+// Para revisar la bienvenida en el navegador: `?bienvenida=1` la abre desde el principio y `?bienvenida=permisos`
+// como si ya se hubiera hecho pero faltara un permiso. Con cualquiera de los dos, los permisos empiezan faltando.
+const pruebaBienvenida = !enApp && typeof location !== 'undefined' && new URLSearchParams(location.search).has('bienvenida');
+
+const bienvenidaEjemplo: Bienvenida = { completa: true, nombre: 'Ronny' };
+
+const permisosEjemplo: Permisos = pruebaBienvenida
+  ? { accesibilidad: false, bluetooth: 'pendiente', notificaciones: 'denegado', pantalla: false }
+  : { accesibilidad: true, bluetooth: 'concedido', notificaciones: 'concedido', pantalla: true };
+
+// Imita al sistema: un permiso pendiente se concede al responder el aviso (enseguida); uno negado, la
+// Accesibilidad o la Grabación de pantalla se activan en Ajustes, así que llegan un rato después.
+function pedirPermisoEjemplo(clave: SeccionPrivacidad): Promise<Permisos> {
+  if (permisoDeSiONo(clave)) {
+    const deSiONo = clave;
+    setTimeout(() => (permisosEjemplo[deSiONo] = true), 2500);
+  } else {
+    const conAviso = clave;
+    if (permisosEjemplo[conAviso] === 'denegado') setTimeout(() => (permisosEjemplo[conAviso] = 'concedido'), 2500);
+    else if (permisosEjemplo[conAviso] === 'pendiente') permisosEjemplo[conAviso] = 'concedido';
+  }
+  return Promise.resolve({ ...permisosEjemplo });
+}
+
+function guardarNombreEjemplo(nombre: string): Promise<string> {
+  const limpio = nombre.trim().slice(0, 30);
+  if (!limpio) return Promise.reject('Escribe tu nombre.');
+  bienvenidaEjemplo.nombre = limpio;
+  return Promise.resolve(limpio);
+}
 
 /** Arma los modos de ejemplo: cada tamaño con sus frecuencias. */
 function modos(
@@ -98,5 +287,125 @@ function cambiarModoEjemplo(id: number, modo: number): Promise<void> {
   const lista = modosDeEjemplo[id];
   if (!lista?.some((m) => m.id === modo)) return Promise.reject('Esa pantalla ya no tiene ese modo');
   for (const m of lista) m.actual = m.id === modo;
+  return Promise.resolve();
+}
+
+// --- Remoto de ejemplo ---
+// `?remoto=sin` muestra la Mac sin sesión y `?remoto=rele` una sesión por el relé de RustDesk.
+
+const pruebaRemoto = !enApp && typeof location !== 'undefined' ? new URLSearchParams(location.search).get('remoto') : null;
+
+// La misma tabla que `ATAJOS` en sistema/remoto.rs.
+const atajosEjemplo: AtajoRemoto[] = (
+  [
+    ['Edición', ['Ctrl', 'C'], ['⌘', 'C'], 'Copiar'],
+    ['Edición', ['Ctrl', 'V'], ['⌘', 'V'], 'Pegar'],
+    ['Edición', ['Ctrl', 'X'], ['⌘', 'X'], 'Cortar'],
+    ['Edición', ['Ctrl', 'Z'], ['⌘', 'Z'], 'Deshacer'],
+    ['Edición', ['Ctrl', 'Y'], ['⌘', '⇧', 'Z'], 'Rehacer'],
+    ['Edición', ['Ctrl', 'A'], ['⌘', 'A'], 'Seleccionar todo'],
+    ['Edición', ['Ctrl', 'S'], ['⌘', 'S'], 'Guardar'],
+    ['Edición', ['Ctrl', 'F'], ['⌘', 'F'], 'Buscar'],
+    ['Edición', ['Ctrl', 'P'], ['⌘', 'P'], 'Imprimir'],
+    ['Edición', ['Ctrl', '⌫'], ['⌥', '⌫'], 'Borrar la palabra anterior'],
+    ['Ventanas y pestañas', ['Ctrl', 'N'], ['⌘', 'N'], 'Ventana o documento nuevo'],
+    ['Ventanas y pestañas', ['Ctrl', 'T'], ['⌘', 'T'], 'Pestaña nueva'],
+    ['Ventanas y pestañas', ['Ctrl', 'W'], ['⌘', 'W'], 'Cerrar la pestaña'],
+    ['Ventanas y pestañas', ['Ctrl', 'Shift', 'T'], ['⌘', '⇧', 'T'], 'Reabrir la pestaña cerrada'],
+    ['Ventanas y pestañas', ['Ctrl', 'R'], ['⌘', 'R'], 'Recargar'],
+    ['Ventanas y pestañas', ['Ctrl', 'L'], ['⌘', 'L'], 'Ir a la barra de direcciones'],
+    ['Moverse en el texto', ['Inicio'], ['⌘', '←'], 'Principio de la línea'],
+    ['Moverse en el texto', ['Fin'], ['⌘', '→'], 'Final de la línea'],
+    ['Moverse en el texto', ['Ctrl', 'Inicio'], ['⌘', '↑'], 'Principio del documento'],
+    ['Moverse en el texto', ['Ctrl', 'Fin'], ['⌘', '↓'], 'Final del documento'],
+    ['Escritorios y apps', ['Ctrl', '← →'], ['⌃', '← →'], 'Cambiar de escritorio'],
+    ['Escritorios y apps', ['Ctrl', 'Win', '← →'], ['⌃', '← →'], 'Cambiar de escritorio, con el atajo de Windows'],
+    ['Escritorios y apps', ['Ctrl', '↑'], ['⌃', '↑'], 'Mission Control: todos los escritorios'],
+    ['Escritorios y apps', ['Alt', 'Tab'], ['⌘', '⇥'], 'Cambiar de app'],
+    ['En la Terminal', ['Ctrl', 'C'], ['⌃', 'C'], 'Detener lo que corre (no se traduce)'],
+    ['En la Terminal', ['Ctrl', 'Shift', 'C'], ['⌘', 'C'], 'Copiar'],
+    ['En la Terminal', ['Ctrl', 'Shift', 'V'], ['⌘', 'V'], 'Pegar'],
+  ] as [string, string[], string[], string][]
+).map(([grupo, windows, mac, accion]) => ({ grupo, windows, mac, accion }));
+
+const remotoEjemplo: EstadoRemoto = {
+  activa: pruebaRemoto !== 'sin',
+  ipRemota: pruebaRemoto === 'sin' ? null : pruebaRemoto === 'rele' ? '40.160.225.24' : '100.118.228.87',
+  equipo: pruebaRemoto === 'sin' || pruebaRemoto === 'rele' ? null : 'innotech1017',
+  directa: pruebaRemoto !== 'sin' && pruebaRemoto !== 'rele',
+  rele: pruebaRemoto === 'rele',
+  tailscale: 'activo',
+  rustdesk: true,
+  rustdeskInstalado: true,
+  ajustes: { traducir: true, captura: true, evitarReposo: true, brilloMinimo: true, portapapelesLiviano: true },
+  atajos: atajosEjemplo,
+  modoTrabajo: false,
+  permisoTeclas: true,
+  permisoPantalla: true,
+  capturaRemotaAbierta: false,
+  ipMac: '100.88.188.99',
+};
+
+const copiaRemoto = (): EstadoRemoto => ({ ...remotoEjemplo, ajustes: { ...remotoEjemplo.ajustes } });
+
+function ajustarRemotoEjemplo(cambio: CambioRemoto): Promise<EstadoRemoto> {
+  const { modoTrabajo, ...ajustes } = cambio;
+  Object.assign(remotoEjemplo.ajustes, ajustes);
+  if (modoTrabajo !== undefined) remotoEjemplo.modoTrabajo = modoTrabajo;
+  return Promise.resolve(copiaRemoto());
+}
+
+function prepararEjemplo(): Promise<EstadoRemoto> {
+  remotoEjemplo.modoTrabajo = true;
+  return new Promise((listo) => setTimeout(() => listo(copiaRemoto()), 1500));
+}
+
+const capturaEjemplo = (): Promise<CapturaRemota | null> =>
+  new Promise((listo) =>
+    setTimeout(
+      () =>
+        listo({
+          ancho: 1512,
+          alto: 982,
+          kb: 214,
+          archivo: '/Users/ronny/Pictures/Capturas remotas/Captura 2026-11-03 a las 18.42.10.png',
+          copiada: true,
+        }),
+      1200,
+    ),
+  );
+
+// Una ventana dibujada, en lugar de una captura de verdad.
+const miniaturaEjemplo =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="104" viewBox="0 0 160 104">' +
+      '<rect width="160" height="104" fill="#e9eef5"/><rect width="160" height="16" fill="#cbd5e1"/>' +
+      '<circle cx="9" cy="8" r="2.6" fill="#ef4444"/><circle cx="17" cy="8" r="2.6" fill="#f59e0b"/>' +
+      '<circle cx="25" cy="8" r="2.6" fill="#22c55e"/><rect x="10" y="26" width="64" height="8" rx="3" fill="#00b894"/>' +
+      '<rect x="10" y="42" width="140" height="5" rx="2.5" fill="#94a3b8"/><rect x="10" y="53" width="120" height="5" rx="2.5" fill="#94a3b8"/>' +
+      '<rect x="10" y="64" width="132" height="5" rx="2.5" fill="#94a3b8"/><rect x="10" y="80" width="56" height="14" rx="4" fill="#2563eb"/></svg>',
+  );
+
+const haceMin = (min: number) => Math.round(Date.now() / 1000 - min * 60);
+
+const textoLargoEjemplo =
+  'Hola equipo, les comparto el resumen de la reunión: el despliegue queda para el jueves a las 18:00, ' +
+  'primero se actualiza la base de datos y después el servidor web. Si algo falla, se vuelve a la versión ' +
+  'anterior con el respaldo de las 17:30. Cualquier duda me escriben por aquí.';
+
+const portapapelesEjemplo: EntradaPortapapeles[] = [
+  { id: 6, tipo: 'texto', texto: 'git push origin main', largo: 20, miniatura: null, ancho: null, alto: null, momento: haceMin(1), origen: 'mac' },
+  { id: 5, tipo: 'imagen', texto: null, largo: null, miniatura: miniaturaEjemplo, ancho: 1512, alto: 982, momento: haceMin(4), origen: 'mac' },
+  { id: 4, tipo: 'texto', texto: textoLargoEjemplo, largo: textoLargoEjemplo.length, miniatura: null, ancho: null, alto: null, momento: haceMin(12), origen: 'remoto' },
+  { id: 3, tipo: 'texto', texto: 'docker compose up -d web\ndocker compose logs -f web', largo: 50, miniatura: null, ancho: null, alto: null, momento: haceMin(26), origen: 'mac' },
+  { id: 2, tipo: 'texto', texto: 'https://tailscale.com/kb/1080/cli', largo: 33, miniatura: null, ancho: null, alto: null, momento: haceMin(48), origen: 'remoto' },
+];
+
+function copiarEjemplo(id: number): Promise<void> {
+  const i = portapapelesEjemplo.findIndex((e) => e.id === id);
+  if (i < 0) return Promise.reject('Esa copia ya no está en el historial.');
+  const [e] = portapapelesEjemplo.splice(i, 1);
+  portapapelesEjemplo.unshift({ ...e, momento: haceMin(0) });
   return Promise.resolve();
 }

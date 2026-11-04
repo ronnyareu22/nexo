@@ -50,7 +50,7 @@
     padding: 0;
     border: 0;
     border-radius: 99px;
-    background: var(--superficie-hundida);
+    background: color-mix(in srgb, var(--texto-3) 32%, var(--superficie-hundida));
     box-shadow: inset 0 0 0 1px var(--borde);
     transition:
       background-color 200ms ease,
@@ -79,7 +79,10 @@
     display: grid;
     place-items: center;
     background: #ffffff;
-    box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
+    box-shadow:
+      0 0 0 0.5px rgb(0 0 0 / 0.1),
+      0 1px 2px rgb(0 0 0 / 0.18),
+      0 3px 8px -2px rgb(0 0 0 / 0.25);
     transition:
       transform 420ms var(--resorte),
       width 200ms ease;

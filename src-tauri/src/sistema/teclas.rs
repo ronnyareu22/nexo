@@ -3,7 +3,7 @@
 //! Escucha las teclas de brillo (eventos "system defined" de macOS). Si el mouse está sobre
 //! un monitor externo que responde a DDC, Nexo cambia ese monitor y se queda con la tecla.
 //! Si está sobre la pantalla de la MacBook, la deja pasar y macOS hace lo de siempre.
-//! Necesita el permiso de Accesibilidad.
+//! Necesita el permiso de Accesibilidad. En Windows no hay atajo (ver abajo).
 
 use crate::dispositivos::pantallas::Pantallas;
 use std::sync::Arc;
@@ -11,15 +11,29 @@ use std::sync::Arc;
 #[cfg(target_os = "macos")]
 pub use mac::{activar, permiso_concedido, pedir_permiso};
 
-#[cfg(not(target_os = "macos"))]
-pub fn activar(_pantallas: Arc<Pantallas>, _encendido: bool) -> Result<(), String> {
-    Err("Todavía no disponible en Windows".into())
+// Windows: los teclados de escritorio no mandan teclas de brillo como la Mac, así que no hay atajo.
+// El brillo se cambia desde Nexo o el widget. Apagarlo siempre funciona (no hay nada que detener).
+#[cfg(windows)]
+pub fn activar(_pantallas: Arc<Pantallas>, encendido: bool) -> Result<(), String> {
+    if encendido { Err("En Windows usa el brillo desde Nexo o el widget.".into()) } else { Ok(()) }
 }
-#[cfg(not(target_os = "macos"))]
+/// Windows no pide permiso de Accesibilidad.
+#[cfg(windows)]
+pub fn permiso_concedido() -> bool {
+    true
+}
+#[cfg(windows)]
+pub fn pedir_permiso() {}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn activar(_pantallas: Arc<Pantallas>, _encendido: bool) -> Result<(), String> {
+    Err("Todavía no disponible en este sistema".into())
+}
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn permiso_concedido() -> bool {
     false
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn pedir_permiso() {}
 
 #[cfg(target_os = "macos")]

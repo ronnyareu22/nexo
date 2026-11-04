@@ -4,13 +4,29 @@
   Aquí se cargan los datos y se pasan a las vistas: aparatos y pantallas cada 5 s (solo con el panel a la vista),
   el nombre del usuario una vez y el brillo 4 veces por segundo solo en Inicio y Pantallas.
   Para revisar el diseño: `?ver=<id>` abre Dispositivos con ese aparato en el panel, `?pagina=<id>` abre su
-  página completa y `?seccion=<id>` abre una sección.
+  página completa y `?seccion=<id>` abre una sección. El widget de escritorio abre el panel con esas mismas
+  direcciones o, si ya está abierto, le manda "nexo-ir".
+  Antes del panel va la puerta de entrada: la bienvenida la primera vez y, en Mac, el paso de permisos si falta
+  alguno obligatorio. Mientras se ve, no se cargan datos ni se lee el brillo. `?bienvenida=1` la fuerza para
+  revisarla (y `?bienvenida=permisos`, fuera de la app, simula que falta un permiso).
+  En Windows hay barra de título del sistema: <html data-plataforma="windows"> achica el espacio de arriba.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import { cambiarConexion, leerBrillos, leerNombreUsuario, listarDispositivos, listarPantallas } from '$lib/api';
+  import {
+    alPedirSeccion,
+    avisarTemaAlWidget,
+    leerBienvenida,
+    leerPermisos,
+    permisosFaltantes,
+    permisosRequeridos,
+    plataforma,
+  } from '$lib/api-sistema';
+  import type { Tema } from '$lib/tema';
   import type { Dispositivo, Estado, Pantalla } from '$lib/tipos';
+  import type { Permisos } from '$lib/tipos-sistema';
   import { nivelPrincipal, nombreDe } from '$lib/tipos';
   import { tooltip } from '$lib/tooltip';
   import BarraLateral, { type EstadoGeneral } from '$lib/componentes/BarraLateral.svelte';
@@ -21,10 +37,15 @@
   import VistaDispositivos from '$lib/vistas/Dispositivos.svelte';
   import VistaAudio from '$lib/vistas/Audio.svelte';
   import VistaPantallas from '$lib/vistas/Pantallas.svelte';
+  import VistaRemoto from '$lib/vistas/Remoto.svelte';
   import VistaAutomatizaciones from '$lib/vistas/Automatizaciones.svelte';
   import VistaAjustes from '$lib/vistas/Ajustes.svelte';
+  import VistaBienvenida from '$lib/vistas/Bienvenida.svelte';
 
-  type Seccion = 'inicio' | 'dispositivos' | 'audio' | 'pantallas' | 'automatizaciones' | 'ajustes';
+  type Seccion = 'inicio' | 'dispositivos' | 'audio' | 'pantallas' | 'remoto' | 'automatizaciones' | 'ajustes';
+
+  // Antes de pintar: en Mac los botones de la ventana van sobre la barra lateral; en Windows no (BarraLateral).
+  document.documentElement.dataset.plataforma = plataforma;
 
   // Widgets y Teclado y ratón todavía no (decisión del dueño, 3 nov).
   const secciones: { id: Seccion; nombre: string; icono: Nombre }[] = [
@@ -32,6 +53,7 @@
     { id: 'dispositivos', nombre: 'Dispositivos', icono: 'dispositivos' },
     { id: 'audio', nombre: 'Audio', icono: 'audio' },
     { id: 'pantallas', nombre: 'Pantallas', icono: 'pantallas' },
+    { id: 'remoto', nombre: 'Remoto', icono: 'remoto' },
     { id: 'automatizaciones', nombre: 'Automatizaciones', icono: 'automatizaciones' },
     { id: 'ajustes', nombre: 'Ajustes', icono: 'engranaje' },
   ];
@@ -64,6 +86,53 @@
   let paginaDispositivo = $state(!!paginaPedida);
   // Lo escrito en el buscador de arriba; lo filtra Dispositivos.
   let busqueda = $state('');
+
+  // --- Puerta de entrada ---
+  // 'revisando' mientras responde Rust (ventana en blanco, sin asomar el panel), 'bienvenida' la primera vez,
+  // 'permisos' si ya se hizo pero falta un permiso obligatorio (Mac) y 'panel' para lo de siempre.
+  type Entrada = 'revisando' | 'bienvenida' | 'permisos' | 'panel';
+  let entrada = $state<Entrada>('revisando');
+  let nombreBienvenida = $state('');
+  let permisosEntrada = $state<Permisos | null>(null);
+  const forzarBienvenida = parametros.get('bienvenida') === '1';
+
+  /** Lee los permisos y dice si falta alguno obligatorio. En Windows no hay ninguno. */
+  async function faltaPermiso(): Promise<boolean> {
+    if (!permisosRequeridos.length) return false;
+    try {
+      const p = await leerPermisos();
+      permisosEntrada = p;
+      return permisosFaltantes(p).length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  async function revisarEntrada() {
+    try {
+      const b = await leerBienvenida();
+      nombreBienvenida = b.nombre.trim();
+      if (!nombre) nombre = nombreBienvenida;
+      if (!b.completa || forzarBienvenida) {
+        entrada = 'bienvenida';
+        return;
+      }
+    } catch {
+      // Si Rust no responde, la ventana no se queda en blanco: sigue, pero los permisos se revisan igual.
+      if (forzarBienvenida) {
+        entrada = 'bienvenida';
+        return;
+      }
+    }
+    entrada = (await faltaPermiso()) ? 'permisos' : 'panel';
+  }
+
+  // Terminó la bienvenida (va a Inicio) o volvió el permiso que faltaba (sigue donde estaba).
+  function alTerminarEntrada(nombreNuevo: string) {
+    if (nombreNuevo) nombre = nombreNuevo;
+    if (entrada === 'bienvenida') ir('inicio');
+    entrada = 'panel';
+  }
 
   let estado = $state<Estado | null>(null);
   let pantallas = $state<Pantalla[]>([]);
@@ -154,10 +223,29 @@
   }
 
   onMount(() => {
-    actualizar();
-    leerNombreUsuario()
-      .then((n) => (nombre = n.trim()))
-      .catch(() => {});
+    revisarEntrada();
+    // Una casilla del widget pidió una sección con el panel ya abierto.
+    const dejarDeEscuchar = alPedirSeccion((d) => ir(d.seccion, d.dispositivo ?? undefined));
+    // El widget sigue el tema que se elige aquí.
+    const alCambiarTema = (e: Event) => avisarTemaAlWidget((e as CustomEvent<Tema>).detail);
+    window.addEventListener('nexo-tema', alCambiarTema);
+    return () => {
+      clearTimeout(temporizadorAviso);
+      dejarDeEscuchar();
+      window.removeEventListener('nexo-tema', alCambiarTema);
+    };
+  });
+
+  // Los datos se cargan solo con el panel a la vista (no durante la bienvenida).
+  $effect(() => {
+    if (entrada !== 'panel') return;
+    untrack(() => {
+      actualizar();
+      if (!nombre)
+        leerNombreUsuario()
+          .then((n) => (nombre = n.trim()))
+          .catch(() => {});
+    });
     // Se refresca solo mientras el panel está a la vista; al volver a verlo, enseguida.
     const intervalo = setInterval(() => {
       if (document.visibilityState === 'visible' && !pendienteId) actualizar();
@@ -166,15 +254,21 @@
       if (document.visibilityState === 'visible' && !pendienteId) actualizar();
     };
     document.addEventListener('visibilitychange', alVolver);
+    // Mac: si al volver a la ventana falta un permiso obligatorio, Nexo se bloquea de nuevo hasta que vuelva.
+    const alEnfocar = async () => {
+      if (await faltaPermiso()) entrada = 'permisos';
+    };
+    if (permisosRequeridos.length) window.addEventListener('focus', alEnfocar);
     return () => {
       clearInterval(intervalo);
-      clearTimeout(temporizadorAviso);
       document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alEnfocar);
     };
   });
 
   // El brillo se lee 4 veces por segundo solo en Inicio y Pantallas, para seguir las teclas al instante.
   $effect(() => {
+    if (entrada !== 'panel') return;
     if (seccion !== 'inicio' && seccion !== 'pantallas') return;
     const brillo = setInterval(async () => {
       if (document.visibilityState !== 'visible' || !pantallas.length) return;
@@ -191,79 +285,100 @@
   });
 </script>
 
-<div class="app">
-  <BarraLateral {secciones} actual={seccion} onelegir={ir} estado={estadoGeneral} />
+{#if entrada === 'revisando'}
+  <!-- Un instante en blanco mientras Rust responde: ni el panel ni la bienvenida asoman antes de tiempo. -->
+  <div class="espera" data-tauri-drag-region aria-busy="true"><span class="solo-lector">Abriendo Nexo…</span></div>
+{:else if entrada === 'bienvenida'}
+  <VistaBienvenida nombreInicial={nombreBienvenida} onlisto={alTerminarEntrada} />
+{:else if entrada === 'permisos'}
+  <VistaBienvenida
+    soloPermisos
+    nombreInicial={nombre || nombreBienvenida}
+    permisosIniciales={permisosEntrada}
+    onlisto={alTerminarEntrada}
+  />
+{:else}
+  <div class="app" in:fade={{ duration: dur(220) }}>
+    <BarraLateral {secciones} actual={seccion} onelegir={ir} estado={estadoGeneral} />
 
-  <div class="principal">
-    <!-- Arriba: el buscador a la izquierda y, a la derecha, Actualizar y el tema. Lo vacío arrastra la ventana. -->
-    <header class="barra" data-tauri-drag-region>
-      <!-- Cada sección ya muestra su título grande; aquí queda solo para lectores de pantalla. -->
-      <h1 class="solo-lector">{titulo}</h1>
-      <Buscador bind:valor={busqueda} onescribir={alBuscar} />
-      <span class="hueco" data-tauri-drag-region></span>
-      <div class="acciones" data-tauri-drag-region>
-        <button
-          class="boton-redondo"
-          class:girando
-          onclick={actualizarAMano}
-          aria-label="Actualizar"
-          aria-busy={girando}
-          use:tooltip={'Actualizar'}
-        >
-          <Icono nombre="actualizar" tamano={18} />
-        </button>
-        <BotonTema />
-      </div>
-    </header>
-
-    <main>
-      {#key seccion}
-        <div
-          class="vista"
-          class:fija={seccion === 'dispositivos'}
-          class:sin-desborde={seccion === 'inicio'}
-          in:fade={{ duration: dur(220) }}
-        >
-          {#if seccion === 'inicio'}
-            <VistaInicio {estado} {pantallas} {nombre} onir={ir} onalternar={alternar} {pendienteId} />
-          {:else if seccion === 'dispositivos'}
-            <VistaDispositivos
-              {estado}
-              {pendienteId}
-              onalternar={alternar}
-              seleccionInicial={dispositivoElegido}
-              onerror={mostrarAviso}
-              onseleccion={(id) => (dispositivoElegido = id)}
-              onactualizar={actualizar}
-              bind:busqueda
-              bind:pagina={paginaDispositivo}
-            />
-          {:else if seccion === 'audio'}
-            <VistaAudio onerror={mostrarAviso} />
-          {:else if seccion === 'pantallas'}
-            <VistaPantallas {pantallas} onerror={mostrarAviso} />
-          {:else if seccion === 'automatizaciones'}
-            <VistaAutomatizaciones dispositivos={estado?.dispositivos ?? []} onerror={mostrarAviso} />
-          {:else if seccion === 'ajustes'}
-            <VistaAjustes onerror={mostrarAviso} />
-          {/if}
+    <div class="principal">
+      <!-- Arriba: el buscador a la izquierda y, a la derecha, Actualizar y el tema. Lo vacío arrastra la ventana. -->
+      <header class="barra" data-tauri-drag-region>
+        <!-- Cada sección ya muestra su título grande; aquí queda solo para lectores de pantalla. -->
+        <h1 class="solo-lector">{titulo}</h1>
+        <Buscador bind:valor={busqueda} onescribir={alBuscar} />
+        <span class="hueco" data-tauri-drag-region></span>
+        <div class="acciones" data-tauri-drag-region>
+          <button
+            class="boton-redondo"
+            class:girando
+            onclick={actualizarAMano}
+            aria-label="Actualizar"
+            aria-busy={girando}
+            use:tooltip={'Actualizar'}
+          >
+            <Icono nombre="actualizar" tamano={18} />
+          </button>
+          <BotonTema />
         </div>
-      {/key}
-    </main>
-  </div>
+      </header>
 
-  {#if aviso}
-    <div class="aviso flotante" role="alert" transition:fade={{ duration: dur(160) }}>
-      <Icono nombre="alerta" tamano={17} />
-      <span>{aviso}</span>
-      <button class="cerrar" onclick={() => (aviso = null)} aria-label="Cerrar aviso">
-        <Icono nombre="cerrar" tamano={15} />
-      </button>
+      <main>
+        {#key seccion}
+          <div
+            class="vista"
+            class:fija={seccion === 'dispositivos'}
+            class:sin-desborde={seccion === 'inicio'}
+            in:fade={{ duration: dur(220) }}
+          >
+            {#if seccion === 'inicio'}
+              <VistaInicio {estado} {pantallas} {nombre} onir={ir} onalternar={alternar} {pendienteId} />
+            {:else if seccion === 'dispositivos'}
+              <VistaDispositivos
+                {estado}
+                {pendienteId}
+                onalternar={alternar}
+                seleccionInicial={dispositivoElegido}
+                onerror={mostrarAviso}
+                onseleccion={(id) => (dispositivoElegido = id)}
+                onactualizar={actualizar}
+                bind:busqueda
+                bind:pagina={paginaDispositivo}
+              />
+            {:else if seccion === 'audio'}
+              <VistaAudio onerror={mostrarAviso} />
+            {:else if seccion === 'pantallas'}
+              <VistaPantallas {pantallas} onerror={mostrarAviso} />
+            {:else if seccion === 'remoto'}
+              <VistaRemoto onerror={mostrarAviso} />
+            {:else if seccion === 'automatizaciones'}
+              <VistaAutomatizaciones dispositivos={estado?.dispositivos ?? []} onerror={mostrarAviso} />
+            {:else if seccion === 'ajustes'}
+              <VistaAjustes {nombre} onnombre={(n) => (nombre = n)} onerror={mostrarAviso} />
+            {/if}
+          </div>
+        {/key}
+      </main>
     </div>
-  {/if}
-</div>
+
+    {#if aviso}
+      <div class="aviso flotante" role="alert" transition:fade={{ duration: dur(160) }}>
+        <Icono nombre="alerta" tamano={17} />
+        <span>{aviso}</span>
+        <button class="cerrar" onclick={() => (aviso = null)} aria-label="Cerrar aviso">
+          <Icono nombre="cerrar" tamano={15} />
+        </button>
+      </div>
+    {/if}
+  </div>
+{/if}
 
 <style>
+  .espera {
+    height: 100vh;
+    background: var(--fondo);
+  }
+
   .app {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -278,14 +393,15 @@
     flex-direction: column;
   }
 
-  /* Fila de arriba: alineada con la zona de arrastre de la barra lateral (52 px). */
+  /* Fila de arriba: alineada con la zona de arrastre de la barra lateral (52 px). En Windows, bajo la barra de
+     título del sistema, mide lo mismo y su centro coincide con el de la marca de la barra lateral. */
   .barra {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     flex-shrink: 0;
     height: 52px;
-    padding: 0 28px;
+    padding: 0 32px;
   }
   .hueco {
     flex: 1;
@@ -294,7 +410,7 @@
   .acciones {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-shrink: 0;
   }
   /* Mientras actualiza, el ícono gira (es un indicador de carga). */
@@ -316,7 +432,7 @@
     position: absolute;
     inset: 0;
     overflow-y: auto;
-    padding: 12px 28px 28px;
+    padding: 8px 32px 32px;
   }
   /* En Inicio la aurora de la mascota puede pasarse del borde: se recorta ahí, sin barra horizontal. */
   .vista.sin-desborde {
@@ -325,7 +441,7 @@
   /* Dispositivos maneja su propio desplazamiento (lista y detalle por separado). */
   .vista.fija {
     overflow: hidden;
-    padding-bottom: 20px;
+    padding-bottom: 24px;
   }
 
   .aviso {
