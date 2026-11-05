@@ -707,7 +707,7 @@
   {#if perfil.leido && !perfil.activo}
     {#if perfil.estado?.modo === 'nunca'}
       <!-- Apagado a propósito en Ajustes: una nota calma, sin la guía. -->
-      <section class="apagado vidrio" aria-labelledby="remoto-apagado">
+      <section class="nota-nunca vidrio" aria-labelledby="remoto-apagado">
         <span class="ficha-icono tenue"><Icono nombre="remoto" tamano={20} /></span>
         <div class="textos">
           <h2 class="titulo-panel" id="remoto-apagado">El trabajo remoto está apagado</h2>
@@ -1474,7 +1474,7 @@
   }
 
   /* "Nunca" en Ajustes: una nota calma. */
-  .apagado {
+  .nota-nunca {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1482,7 +1482,7 @@
     padding: 16px 20px;
     border-radius: var(--radio-lg);
   }
-  .apagado .textos {
+  .nota-nunca .textos {
     flex: 1 1 240px;
   }
 
