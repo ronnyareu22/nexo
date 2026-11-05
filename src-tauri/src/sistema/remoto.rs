@@ -259,6 +259,12 @@ pub fn iniciar(app: &AppHandle) {
 fn ejecutar(programa: &Path, args: &[&str], limite: Duration) -> Option<Vec<u8>> {
     let mut comando = Command::new(programa);
     comando.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    // Sin TERM (Nexo abierto al iniciar sesión), el programa de Tailscale.app cree que lo abren como app y no
+    // contesta ("The Tailscale GUI failed to start"): XDrop no escuchaba tras reiniciar la Mac.
+    #[cfg(target_os = "macos")]
+    if std::env::var_os("TERM").is_none() {
+        comando.env("TERM", "dumb");
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
