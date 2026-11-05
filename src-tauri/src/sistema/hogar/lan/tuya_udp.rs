@@ -106,6 +106,7 @@ pub fn hallazgo(a: &Aviso) -> Hallazgo {
         nombre: "Aparato Tuya".into(),
         modelo: a.producto.clone(),
         direccion: Some(a.ip.clone()),
+        mac: None,
         senal: None,
         version: a.version.clone(),
         capacidades: Capacidades::ninguna(),

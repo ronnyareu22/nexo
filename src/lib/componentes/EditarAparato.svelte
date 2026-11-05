@@ -1,7 +1,8 @@
 <!--
   Cambiar un aparato de la casa: su nombre en Nexo (vacío vuelve al suyo), su habitación y, si es una luz, su forma
   (tira, foco, lámpara de monitor, lámpara). Abajo, en tenue, por dónde se maneja, su modelo y su dirección.
-  Lo agregado desde una búsqueda (WiZ, Yeelight, Govee, Bluetooth) también se puede quitar de Nexo.
+  Lo agregado desde tu red o por Bluetooth (Hue, LIFX, Nanoleaf, Elgato, WLED, Shelly, Tasmota, WiZ, Yeelight, Govee,
+  tiras) también se puede quitar de Nexo.
 -->
 <script lang="ts">
   import { FORMAS_LUZ, tipoDe, viaDe } from '$lib/hogar';
@@ -25,7 +26,20 @@
     oncerrar: () => void;
   } = $props();
 
-  const LOCALES = ['wiz', 'yeelight', 'govee', 'bleElk', 'bleTriones'];
+  const LOCALES = [
+    'wiz',
+    'yeelight',
+    'govee',
+    'hue',
+    'lifx',
+    'shelly',
+    'nanoleaf',
+    'elgato',
+    'wled',
+    'tasmota',
+    'bleElk',
+    'bleTriones',
+  ];
 
   let alias = $state('');
   let habitacion = $state('');

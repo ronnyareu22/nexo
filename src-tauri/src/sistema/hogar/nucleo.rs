@@ -1,19 +1,23 @@
 //! El centro de la casa: lo que se sabe de cada cuenta, cómo se lee, cómo se cumple una orden y cómo se busca.
 //!
 //! - Memoria: la lista de Tuya (y lo que acepta cada aparato, también en `casa.json`), las entidades de Home
-//!   Assistant, el estado de lo local y lo encontrado en la última búsqueda. Las claves se leen del llavero una
-//!   vez y quedan solo en memoria.
+//!   Assistant, el estado de lo local, las habitaciones de los puentes Hue y lo encontrado en la última búsqueda.
+//!   Las claves se leen del llavero una vez y quedan solo en memoria.
 //! - Se lee a pedido (como mucho cada 15 s por cuenta); tras una orden, el estado se ajusta enseguida con lo que se
-//!   mandó (sin volver a preguntar).
+//!   mandó (sin volver a preguntar). Un puente Hue se lee una vez para todas sus luces.
+//! - Lo local que no contesta queda "Sin respuesta" (sin error). Si tiene MAC, se busca en la tabla de vecinos por
+//!   si el router le dio otra IP (como mucho una vez por minuto); si contesta allí, la IP nueva se anota sola.
 //! - Varias órdenes a la vez van en paralelo (una por aparato) y se cuentan en palabras.
 
+use super::firma::hex;
 use super::modelo::{
     Accion, Cambio, Capacidades, Clase, Destino, EstadoAparato, Hallazgo, Manejo, Objetivo, Orden, Proveedor, Via, cambio_de,
     normalizar,
 };
 use super::{
     Aparato, AjustesHogar, CambioAparato, CuentaHa, CuentaTuya, DatosConexionHa, DatosConexionTuya, DatosTuya, EstadoCasa,
-    Falla, Grupo, HallazgoVista, Habitacion, Local, ResultadoBusqueda, ResultadoOrden, ble, ejemplo, ha, lan, llavero, tuya,
+    Falla, Grupo, HallazgoVista, Habitacion, Local, Puente, ResultadoBusqueda, ResultadoOrden, ResultadoRed, ResultadoVinculo, ble,
+    ejemplo, ha, lan, llavero, red, tuya,
 };
 use crate::sistema::ajustes;
 use serde::{Deserialize, Serialize};
@@ -31,6 +35,10 @@ const LISTA: Duration = Duration::from_secs(600);
 /// Las áreas de Home Assistant, cada 5 min.
 const AREAS: Duration = Duration::from_secs(300);
 const BUSQUEDA: Duration = Duration::from_secs(6);
+/// "Tu red" es más corta: sin Bluetooth.
+const ANALISIS: Duration = Duration::from_secs(4);
+/// Lo que no contesta se vuelve a buscar por su MAC como mucho una vez por minuto.
+const REENCUENTRO: Duration = Duration::from_secs(60);
 const MAX_NOMBRE: usize = 40;
 const MAX_GRUPOS: usize = 30;
 const MAX_HABITACIONES: usize = 30;
@@ -74,6 +82,14 @@ struct Memoria {
     token_ha: Option<(String, String)>,
     hallazgos: Vec<Hallazgo>,
     actualizado: Option<u64>,
+    /// Las claves de los aparatos de la red (cuenta → clave), leídas del llavero una vez.
+    claves: BTreeMap<String, String>,
+    /// La habitación que dice el puente Hue de cada luz (id → nombre).
+    salas_hue: BTreeMap<String, String>,
+    /// Cuándo se buscó por última vez por su MAC algo que no contestaba.
+    reencuentros: BTreeMap<String, Instant>,
+    /// Mientras se vincula un puente Hue: la huella de su certificado, para que todos los intentos vayan al mismo.
+    huellas: BTreeMap<String, [u8; 32]>,
 }
 
 static MEMORIA: Mutex<Memoria> = Mutex::new(Memoria {
@@ -95,6 +111,10 @@ static MEMORIA: Mutex<Memoria> = Mutex::new(Memoria {
     token_ha: None,
     hallazgos: Vec::new(),
     actualizado: None,
+    claves: BTreeMap::new(),
+    salas_hue: BTreeMap::new(),
+    reencuentros: BTreeMap::new(),
+    huellas: BTreeMap::new(),
 });
 static LEYENDO: AtomicBool = AtomicBool::new(false);
 static BUSCANDO: AtomicBool = AtomicBool::new(false);
@@ -221,6 +241,65 @@ fn conexion_ha(a: &AjustesHogar) -> Result<Option<ha::Conexion>, String> {
         }
     };
     Ok(Some(ha::Conexion { url: c.url.clone(), token }))
+}
+
+/// El id del aparato sin la salida ("shelly:a8032ab1c2d3/switch:1" → "shelly:a8032ab1c2d3").
+fn base(id: &str) -> &str {
+    id.split('/').next().unwrap_or(id)
+}
+
+/// Con qué cuenta va su clave al llavero: la de su puente o la de su aparato.
+fn cuenta_clave(l: &Local) -> String {
+    l.puente.clone().unwrap_or_else(|| base(&l.id).to_string())
+}
+
+/// La clave de una cuenta de aparato (de la memoria o, la primera vez, del llavero).
+fn clave_de_cuenta(cuenta: &str) -> Result<String, String> {
+    if let Some(c) = memoria().claves.get(cuenta) {
+        return Ok(c.clone());
+    }
+    let c = llavero::leer(llavero::Clave::Aparato, cuenta)?.ok_or("Falta la clave de este aparato en el llavero: quítalo y agrégalo de nuevo.")?;
+    memoria().claves.insert(cuenta.to_string(), c.clone());
+    Ok(c)
+}
+
+fn guardar_clave(cuenta: &str, clave: &str) -> Result<(), String> {
+    llavero::guardar(llavero::Clave::Aparato, cuenta, clave)?;
+    memoria().claves.insert(cuenta.to_string(), clave.to_string());
+    Ok(())
+}
+
+fn huella_de(texto: &str) -> Option<[u8; 32]> {
+    let t = texto.trim();
+    if t.len() != 64 {
+        return None;
+    }
+    let mut h = [0u8; 32];
+    for (i, b) in h.iter_mut().enumerate() {
+        *b = u8::from_str_radix(t.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(h)
+}
+
+/// Cómo llegar a un aparato local (su IP, o la de su puente, y su clave), para `lan::leer` y `lan::cambiar`.
+fn con_acceso<T>(a: &AjustesHogar, l: &Local, otra_ip: Option<&str>, f: impl FnOnce(&lan::Acceso) -> T) -> Result<T, String> {
+    let puente = l.puente.as_ref().and_then(|p| a.puentes.iter().find(|x| x.id == *p));
+    let direccion = otra_ip.map(str::to_string).or_else(|| puente.map(|p| p.direccion.clone())).unwrap_or_else(|| l.direccion.clone());
+    let clave = if l.con_clave { Some(clave_de_cuenta(&cuenta_clave(l))?) } else { None };
+    let modelo = puente.and_then(|p| p.modelo.clone()).or_else(|| l.modelo.clone());
+    let acceso = lan::Acceso {
+        id: &l.id,
+        direccion: &direccion,
+        modelo: modelo.as_deref(),
+        canal: l.canal.as_deref(),
+        clave: clave.as_deref(),
+        kelvin: l.kelvin,
+        puerto: l.puerto,
+        luz: l.clase == Clase::Luz,
+        color: l.capacidades.color,
+        huella: puente.and_then(|p| p.huella.as_deref()).and_then(huella_de),
+    };
+    Ok(f(&acceso))
 }
 
 // ---------------------------------------------------------------- Leer cada cuenta
@@ -354,32 +433,157 @@ fn leer_ha(a: &AjustesHogar) {
     }
 }
 
-/// Lo local que sabe decir cómo está (WiZ, Yeelight, Govee), en paralelo. Bluetooth no: se recuerda lo mandado.
-fn leer_locales(a: &AjustesHogar) {
+/// Las luces de un puente Hue, de una sola vez: (id, estado si contesta) y (id, habitación del puente).
+type LeidoPuente = (Vec<(String, Option<EstadoAparato>)>, Vec<(String, String)>);
+
+fn leer_puente(puente: &Puente, luces: &[&Local], otra_ip: Option<&str>) -> LeidoPuente {
+    let sin = || (luces.iter().map(|l| (l.id.clone(), None)).collect(), Vec::new());
+    let Ok(clave) = clave_de_cuenta(&puente.id) else { return sin() };
+    let Ok(ip) = lan::ip_de(otra_ip.unwrap_or(&puente.direccion)) else { return sin() };
+    let p = lan::hue::Puente::nuevo(ip, puente.modelo.as_deref(), puente.huella.as_deref().and_then(huella_de));
+    match lan::hue::leer_todo(&p, &clave) {
+        Ok((del_puente, salas)) => {
+            let estados = luces
+                .iter()
+                .map(|l| {
+                    let e = del_puente.iter().find(|x| Some(x.numero.as_str()) == l.canal.as_deref()).filter(|x| x.alcanzable).map(|x| x.estado);
+                    (l.id.clone(), e)
+                })
+                .collect();
+            let por_sala = luces
+                .iter()
+                .filter_map(|l| {
+                    let n = l.canal.as_deref()?;
+                    salas.iter().find(|(_, ls)| ls.iter().any(|x| x == n)).map(|(nombre, _)| (l.id.clone(), nombre.clone()))
+                })
+                .collect();
+            (estados, por_sala)
+        }
+        Err(_) => sin(),
+    }
+}
+
+/// Lo local que sabe decir cómo está, en paralelo (un puente Hue, una vez para todas sus luces). Bluetooth no: se
+/// recuerda lo mandado. Lo que no contesta queda sin conexión y, si tiene MAC, se busca en otra IP.
+fn leer_locales(app: &AppHandle, a: &AjustesHogar) {
     if ejemplo::activo() {
         return;
     }
     let lista: Vec<&Local> = a.locales.iter().filter(|l| !l.proveedor.por_bluetooth() && l.capacidades.informa_estado).collect();
-    let leidos: Vec<(String, Option<EstadoAparato>)> = std::thread::scope(|s| {
-        let hilos: Vec<_> = lista
+    let (de_puente, sueltos): (Vec<&Local>, Vec<&Local>) = lista.into_iter().partition(|l| l.puente.is_some());
+    let (leidos, salas): LeidoPuente = std::thread::scope(|s| {
+        let hilos: Vec<_> = sueltos
             .iter()
-            .map(|l| s.spawn(move || (l.id.clone(), lan::leer(l.proveedor, &l.direccion, l.modelo.as_deref()).ok())))
+            .map(|l| s.spawn(move || (l.id.clone(), con_acceso(a, l, None, |ac| lan::leer(l.proveedor, ac)).ok().and_then(|r| r.ok()))))
             .collect();
-        hilos.into_iter().filter_map(|h| h.join().ok()).collect()
-    });
-    let mut m = memoria();
-    for (id, e) in leidos {
-        match e {
-            Some(e) => {
-                m.locales.insert(id, (e, true));
-            }
-            None => {
-                let antes = m.locales.get(&id).map(|x| x.0).unwrap_or_default();
-                m.locales.insert(id, (antes, false));
+        let puentes: Vec<_> = a
+            .puentes
+            .iter()
+            .map(|p| {
+                let suyas: Vec<&Local> = de_puente.iter().filter(|l| l.puente.as_deref() == Some(p.id.as_str())).copied().collect();
+                s.spawn(move || leer_puente(p, &suyas, None))
+            })
+            .collect();
+        let mut leidos: Vec<(String, Option<EstadoAparato>)> = hilos.into_iter().filter_map(|h| h.join().ok()).collect();
+        let mut salas = Vec::new();
+        for h in puentes {
+            if let Ok((e, sa)) = h.join() {
+                leidos.extend(e);
+                salas.extend(sa);
             }
         }
+        (leidos, salas)
+    });
+    let caidos: Vec<String> = leidos.iter().filter(|(_, e)| e.is_none()).map(|(id, _)| id.clone()).collect();
+    {
+        let mut m = memoria();
+        for (id, e) in leidos {
+            match e {
+                Some(e) => {
+                    m.locales.insert(id, (e, true));
+                }
+                None => {
+                    let antes = m.locales.get(&id).map(|x| x.0).unwrap_or_default();
+                    m.locales.insert(id, (antes, false));
+                }
+            }
+        }
+        if !salas.is_empty() {
+            m.salas_hue = salas.into_iter().collect();
+        }
+        m.locales_leido = Some(Instant::now());
     }
-    m.locales_leido = Some(Instant::now());
+    if !caidos.is_empty() {
+        reencontrar(app, a, &caidos);
+    }
+}
+
+/// Lo que no contestó y tiene MAC: se despierta la tabla de vecinos y, si su MAC está en otra IP y allí contesta,
+/// se anota la IP nueva (sin avisar: es el mismo aparato). Como mucho una vez por minuto por aparato.
+fn reencontrar(app: &AppHandle, a: &AjustesHogar, ids: &[String]) {
+    let ahora = Instant::now();
+    // (id del aparato o del puente, MAC, IP de ahora)
+    let mut buscados: Vec<(String, String, String)> = Vec::new();
+    {
+        let mut m = memoria();
+        for id in ids {
+            let Some(l) = a.locales.iter().find(|l| l.id == *id) else { continue };
+            let (cual, mac, ip) = match l.puente.as_ref().and_then(|p| a.puentes.iter().find(|x| x.id == *p)) {
+                Some(p) => (p.id.clone(), p.mac.clone(), p.direccion.clone()),
+                None => (l.id.clone(), l.mac.clone(), l.direccion.clone()),
+            };
+            let Some(mac) = mac else { continue };
+            if buscados.iter().any(|b| b.0 == cual) || m.reencuentros.get(&cual).is_some_and(|t| ahora.duration_since(*t) < REENCUENTRO) {
+                continue;
+            }
+            m.reencuentros.insert(cual.clone(), ahora);
+            buscados.push((cual, mac, ip));
+        }
+    }
+    if buscados.is_empty() {
+        return;
+    }
+    red::despertar(&red::red());
+    std::thread::sleep(Duration::from_millis(1200));
+    let vecinos = red::vecinos();
+    let nuevas: Vec<(String, String)> = buscados
+        .into_iter()
+        .filter_map(|(cual, mac, ip)| {
+            let (nueva, _) = vecinos.iter().find(|(_, m)| *m == mac)?;
+            let nueva = nueva.to_string();
+            if nueva == ip.split(':').next().unwrap_or(&ip) {
+                return None;
+            }
+            // Se prueba allí antes de anotarla.
+            let contesta = match a.puentes.iter().find(|p| p.id == cual) {
+                Some(p) => {
+                    let suyas: Vec<&Local> = a.locales.iter().filter(|l| l.puente.as_deref() == Some(p.id.as_str())).collect();
+                    leer_puente(p, &suyas, Some(&nueva)).0.iter().any(|(_, e)| e.is_some())
+                }
+                None => {
+                    let l = a.locales.iter().find(|l| l.id == cual)?;
+                    con_acceso(a, l, Some(&nueva), |ac| lan::leer(l.proveedor, ac)).ok().is_some_and(|r| r.is_ok())
+                }
+            };
+            contesta.then_some((cual, nueva))
+        })
+        .collect();
+    if nuevas.is_empty() {
+        return;
+    }
+    let _ = cambiar_hogar(app, |hg| {
+        for (cual, ip) in &nuevas {
+            if let Some(p) = hg.puentes.iter_mut().find(|p| p.id == *cual) {
+                p.direccion = ip.clone();
+            }
+            for l in hg.locales.iter_mut().filter(|l| l.id == *cual || l.puente.as_deref() == Some(cual.as_str())) {
+                l.direccion = ip.clone();
+            }
+        }
+        Ok(())
+    });
+    // La próxima lectura ya va a la IP nueva.
+    memoria().locales_leido = None;
 }
 
 /// Lee lo que haga falta (en paralelo) y arma la casa.
@@ -404,7 +608,7 @@ pub fn estado(app: &AppHandle, fresco: bool) -> EstadoCasa {
                 s.spawn(|| leer_ha(&a));
             }
             if l && !a.locales.is_empty() {
-                s.spawn(|| leer_locales(&a));
+                s.spawn(|| leer_locales(app, &a));
             }
         });
         memoria().actualizado = Some(segundos());
@@ -513,8 +717,9 @@ fn de_ha(e: &ha::Entidad) -> Aparato {
     }
 }
 
-fn de_local(l: &Local, leido: Option<&(EstadoAparato, bool)>) -> Aparato {
+fn de_local(l: &Local, puentes: &[Puente], leido: Option<&(EstadoAparato, bool)>) -> Aparato {
     let (estado, responde) = leido.copied().unwrap_or((EstadoAparato::default(), true));
+    let direccion = l.puente.as_ref().and_then(|p| puentes.iter().find(|x| x.id == *p)).map(|p| p.direccion.clone()).unwrap_or_else(|| l.direccion.clone());
     Aparato {
         id: l.id.clone(),
         proveedor: l.proveedor,
@@ -527,7 +732,7 @@ fn de_local(l: &Local, leido: Option<&(EstadoAparato, bool)>) -> Aparato {
         habitacion: None,
         marca: Some(l.marca.clone()).filter(|m| !m.is_empty()),
         modelo: l.modelo.clone(),
-        direccion: Some(l.direccion.clone()),
+        direccion: Some(direccion),
         en_linea: responde,
         controlable: true,
         capacidades: l.capacidades,
@@ -543,16 +748,21 @@ fn de_local(l: &Local, leido: Option<&(EstadoAparato, bool)>) -> Aparato {
 fn armar(a: &AjustesHogar) -> EstadoCasa {
     let m = memoria();
     let mut aparatos: Vec<Aparato> = m.tuya.iter().map(de_tuya).collect();
-    aparatos.extend(a.locales.iter().map(|l| de_local(l, m.locales.get(&l.id))));
+    aparatos.extend(a.locales.iter().map(|l| de_local(l, &a.puentes, m.locales.get(&l.id))));
     // Lo de Home Assistant que Nexo ya maneja directo (por la cuenta de Tuya o la red local) no se repite.
     let directos: BTreeSet<String> = aparatos.iter().map(|x| clave_directa(&x.id)).collect();
-    let areas: BTreeMap<String, String> =
+    let mut areas: BTreeMap<String, String> =
         m.ha.iter().filter_map(|e| e.area.clone().map(|ar| (format!("ha:{}", e.id), ar))).collect();
+    // Las habitaciones del puente Hue, como las áreas de Home Assistant.
+    areas.extend(m.salas_hue.iter().map(|(k, v)| (k.clone(), v.clone())));
     aparatos.extend(m.ha.iter().filter(|e| !e.enlaces.iter().any(|x| directos.contains(x))).map(de_ha));
 
     // Habitaciones: las de la persona y las áreas de Home Assistant que no estén.
     let mut habitaciones = habitaciones_base(a);
-    for area in ha::nombres_de_areas(&m.ha) {
+    let mut de_salas: Vec<String> = m.salas_hue.values().cloned().collect();
+    de_salas.sort();
+    de_salas.dedup();
+    for area in ha::nombres_de_areas(&m.ha).into_iter().chain(de_salas) {
         if !habitaciones.iter().any(|h| normalizar(&h.nombre) == normalizar(&area)) {
             habitaciones.push(Habitacion { id: id_de_area(&area), nombre: area });
         }
@@ -834,13 +1044,21 @@ fn hacer_cambio(a: &AjustesHogar, x: &Aparato, cambio: &Cambio) -> Result<(), St
             }
             Ok(())
         }
-        Proveedor::Wiz | Proveedor::Yeelight | Proveedor::Govee | Proveedor::BleElk | Proveedor::BleTriones => {
+        p if p.es_local() => {
             if !ejemplo {
-                let direccion = x.direccion.clone().unwrap_or_default();
-                if x.proveedor.por_bluetooth() {
-                    ble::cambiar(x.proveedor, &direccion, cambio)?;
+                if p.por_bluetooth() {
+                    ble::cambiar(p, x.direccion.as_deref().unwrap_or_default(), cambio)?;
                 } else {
-                    lan::cambiar(x.proveedor, &direccion, x.modelo.as_deref(), cambio)?;
+                    let l = a.locales.iter().find(|l| l.id == x.id).ok_or("Ese aparato ya no está en Nexo.")?;
+                    if let Err(e) = con_acceso(a, l, None, |ac| lan::cambiar(p, ac, cambio))? {
+                        if e.starts_with("No responde") {
+                            if let Some(v) = memoria().locales.get_mut(&x.id) {
+                                v.1 = false;
+                            }
+                            return Err(format!("{} no responde. Revisa que esté encendido y en la misma red.", x.nombre));
+                        }
+                        return Err(e);
+                    }
                 }
             }
             let mut m = memoria();
@@ -849,7 +1067,7 @@ fn hacer_cambio(a: &AjustesHogar, x: &Aparato, cambio: &Cambio) -> Result<(), St
             e.1 = true;
             Ok(())
         }
-        Proveedor::Hue | Proveedor::Lifx | Proveedor::Ninguno | Proveedor::Ejemplo => Err(format!("{} {}", x.nombre, PRONTO)),
+        _ => Err(format!("{} {}", x.nombre, PRONTO)),
     }
 }
 
@@ -878,7 +1096,8 @@ fn hacer_accion(a: &AjustesHogar, x: &Aparato, accion: &Accion, confirmado: bool
     if !x.controlable {
         return Err(x.nota.clone().map(|n| format!("{}: {n}", x.nombre)).unwrap_or_else(|| format!("{} solo informa.", x.nombre)));
     }
-    if !x.en_linea && x.proveedor != Proveedor::HomeAssistant {
+    // Lo local se intenta igual: quizá ya volvió (si no, dice que no responde).
+    if !x.en_linea && x.proveedor != Proveedor::HomeAssistant && !x.proveedor.es_local() {
         return Err(format!("{} está sin conexión.", x.nombre));
     }
     // Home Assistant tiene su servicio para cada cosa (tele, cerradura, cortina); las luces van por el cambio.
@@ -1042,7 +1261,7 @@ pub async fn aplicar_objetivo(app: AppHandle, destino: Destino, objetivo: Objeti
                 .map(|x| {
                     let a = &a;
                     s.spawn(move || {
-                        if !x.en_linea && x.proveedor != Proveedor::HomeAssistant {
+                        if !x.en_linea && x.proveedor != Proveedor::HomeAssistant && !x.proveedor.es_local() {
                             return Some(format!("{} está sin conexión.", x.nombre));
                         }
                         hacer_cambio(a, x, &objetivo.cambio(&x.capacidades)).err()
@@ -1059,6 +1278,80 @@ pub async fn aplicar_objetivo(app: AppHandle, destino: Destino, objetivo: Objeti
 }
 
 // ---------------------------------------------------------------- Buscar
+
+/// Lo local que ya está en Nexo con ese hallazgo: el mismo id, una de sus salidas o las luces de su puente.
+fn ya_esta(a: &AjustesHogar, id: &str) -> bool {
+    a.locales.iter().any(|l| l.id == id || base(&l.id) == id || l.puente.as_deref() == Some(id)) || a.puentes.iter().any(|p| p.id == id)
+}
+
+/// Después de buscar: si cada cosa ya está en Nexo, lo de Tuya en palabras, las IP nuevas (por id o por MAC) y lo
+/// encontrado en memoria (para agregarlo). `con_bluetooth`: si se buscó por Bluetooth (si no, se queda lo de antes).
+fn vistas_de(app: &AppHandle, a: &AjustesHogar, hallazgos: &mut [Hallazgo], con_bluetooth: bool) -> Vec<HallazgoVista> {
+    let (nube, conectado_tuya): (BTreeMap<String, String>, bool) = {
+        let m = memoria();
+        (m.tuya.iter().map(|d| (format!("tuya:{}", d.aparato.id), d.aparato.nombre.clone())).collect(), a.tuya.is_some() || ejemplo::activo())
+    };
+    let mut vistas = Vec::with_capacity(hallazgos.len());
+    for h in hallazgos.iter_mut() {
+        let mut agregado = ya_esta(a, &h.id);
+        if h.proveedor == Proveedor::Tuya {
+            if let Some(nombre) = nube.get(&h.id) {
+                h.nombre = nombre.clone();
+                h.manejo = Manejo::Listo;
+                agregado = true;
+            } else if conectado_tuya {
+                h.manejo = Manejo::Pronto { motivo: "Está en tu red, pero no en la cuenta de Tuya conectada.".into() };
+            }
+        }
+        // Lo ya vinculado no se vuelve a vincular.
+        if agregado && matches!(h.manejo, Manejo::Vincular { .. }) {
+            h.manejo = Manejo::Listo;
+        }
+        if let Manejo::HomeAssistant { url } = &h.manejo {
+            agregado = a.home_assistant.as_ref().is_some_and(|c| c.url == *url) || ejemplo::activo();
+        }
+        vistas.push(HallazgoVista { hallazgo: h.clone(), agregado });
+    }
+    // Si algo local cambió de IP (el mismo id, la misma base o la misma MAC), se anota la nueva.
+    let movidas: Vec<(String, String)> = hallazgos
+        .iter()
+        .filter(|h| h.via == Via::Wifi)
+        .filter_map(|h| {
+            let d = h.direccion.clone()?;
+            let mismo = |id: &str, mac: Option<&str>| id == h.id || base(id) == h.id || (mac.is_some() && mac == h.mac.as_deref());
+            if let Some(p) = a.puentes.iter().find(|p| mismo(&p.id, p.mac.as_deref())) {
+                return (p.direccion != d).then(|| (p.id.clone(), d));
+            }
+            let l = a.locales.iter().find(|l| l.puente.is_none() && mismo(&l.id, l.mac.as_deref()))?;
+            (d != l.direccion).then(|| (base(&l.id).to_string(), d))
+        })
+        .collect();
+    if !movidas.is_empty() {
+        let _ = cambiar_hogar(app, |hg| {
+            for (id, d) in &movidas {
+                if let Some(p) = hg.puentes.iter_mut().find(|p| p.id == *id) {
+                    p.direccion = d.clone();
+                }
+                for l in hg.locales.iter_mut().filter(|l| base(&l.id) == id || l.puente.as_deref() == Some(id.as_str())) {
+                    l.direccion = d.clone();
+                }
+            }
+            Ok(())
+        });
+    }
+    let mut m = memoria();
+    for h in hallazgos.iter().filter(|h| h.proveedor.es_local()) {
+        if let Some(e) = h.estado {
+            m.locales.insert(h.id.clone(), (e, true));
+        }
+    }
+    let mut lista: Vec<Hallazgo> = hallazgos.to_vec();
+    if !con_bluetooth {
+        lista.extend(m.hallazgos.iter().filter(|h| h.via == Via::Bluetooth).cloned());
+    }
+    m.hallazgos = lista;
+    vistas
+}
 
 /// Busca en la red y por Bluetooth a la vez (≈6 s); de paso, pone al día la lista de Tuya.
 pub fn buscar(app: &AppHandle) -> Result<ResultadoBusqueda, String> {
@@ -1090,59 +1383,93 @@ pub fn buscar(app: &AppHandle) -> Result<ResultadoBusqueda, String> {
         }
         v
     };
+    let vistas = vistas_de(app, &a, &mut hallazgos, true);
+    Ok(ResultadoBusqueda { hallazgos: vistas, avisos, segundos: inicio.elapsed().as_secs_f32(), estado: armar(&hogar(app)) })
+}
 
-    // Lo de Tuya visto en la red: si está en la cuenta, ya está en Nexo.
-    let (nube, conectado_tuya): (BTreeMap<String, String>, bool) = {
-        let m = memoria();
-        (m.tuya.iter().map(|d| (format!("tuya:{}", d.aparato.id), d.aparato.nombre.clone())).collect(), a.tuya.is_some() || ejemplo::activo())
-    };
-    let locales: BTreeSet<&str> = a.locales.iter().map(|l| l.id.as_str()).collect();
-    let mut vistas = Vec::with_capacity(hallazgos.len());
-    for h in &mut hallazgos {
-        let mut agregado = locales.contains(h.id.as_str());
-        if h.proveedor == Proveedor::Tuya {
-            if let Some(nombre) = nube.get(&h.id) {
-                h.nombre = nombre.clone();
-                h.manejo = Manejo::Listo;
-                agregado = true;
-            } else if conectado_tuya {
-                h.manejo = Manejo::Pronto { motivo: "Está en tu red, pero no en la cuenta de Smart Life vinculada.".into() };
-            }
-        }
-        if let Manejo::HomeAssistant { url } = &h.manejo {
-            agregado = a.home_assistant.as_ref().is_some_and(|c| c.url == *url) || ejemplo::activo();
-        }
-        vistas.push(HallazgoVista { hallazgo: h.clone(), agregado });
+/// La IP de una dirección ("192.168.1.5" o "192.168.1.5:16021").
+fn ip_de_texto(d: &str) -> Option<std::net::Ipv4Addr> {
+    lan::ip_de(d).ok()
+}
+
+/// Tu red: lo que hay en la misma red (≈4 s), con lo encontrado para agregar y el porqué de lo demás.
+pub fn red(app: &AppHandle) -> Result<ResultadoRed, String> {
+    if BUSCANDO.swap(true, Ordering::SeqCst) {
+        return Err("Ya estoy buscando; espera unos segundos.".into());
     }
-    // Si una luz local cambió de IP, se anota la nueva.
-    let movidas: Vec<(String, String)> = hallazgos
+    let _suelta = Suelta(&BUSCANDO);
+    cargar(app);
+    let inicio = Instant::now();
+    let a = hogar(app);
+    let (mut b, inversos) = if ejemplo::activo() {
+        std::thread::sleep(Duration::from_millis(1200));
+        let hallazgos = ejemplo::hallazgos().into_iter().filter(|h| h.via == Via::Wifi).collect::<Vec<_>>();
+        let vecinos = hallazgos
+            .iter()
+            .filter_map(|h| Some((ip_de_texto(h.direccion.as_deref()?)?, "02:00:00:00:00:01".to_string())))
+            .collect();
+        let r = red::Red { ip: Some(std::net::Ipv4Addr::new(192, 168, 1, 20)), prefijo: Some(24), router: Some(std::net::Ipv4Addr::new(192, 168, 1, 1)) };
+        (lan::Busqueda { hallazgos, pistas: Vec::new(), vecinos, red: r }, BTreeMap::new())
+    } else {
+        std::thread::scope(|s| {
+            let busqueda = s.spawn(|| lan::buscar_todo(ANALISIS));
+            // La tabla de vecinos ya está despierta a los ≈2,8 s: los nombres por DNS van mientras termina lo demás.
+            let nombres = s.spawn(|| {
+                std::thread::sleep(Duration::from_millis(2800));
+                let r = red::red();
+                let ips: Vec<std::net::Ipv4Addr> = red::vecinos().into_iter().map(|(ip, _)| ip).collect();
+                red::nombres::inversos(&ips, r.router, Duration::from_millis(900))
+            });
+            (busqueda.join().unwrap_or_default(), nombres.join().unwrap_or_default())
+        })
+    };
+    let vistas = vistas_de(app, &a, &mut b.hallazgos, false);
+    let casa = armar(&hogar(app));
+
+    // Todas las IPs: los vecinos, lo encontrado y este equipo.
+    let propia = b.red.ip;
+    let mut ips: Vec<std::net::Ipv4Addr> = b.vecinos.iter().map(|(ip, _)| *ip).collect();
+    ips.extend(vistas.iter().filter_map(|v| ip_de_texto(v.hallazgo.direccion.as_deref()?)));
+    ips.extend(propia);
+    ips.sort();
+    ips.dedup();
+    let mut equipos: Vec<red::EquipoRed> = ips
         .iter()
-        .filter_map(|h| {
-            let l = a.locales.iter().find(|l| l.id == h.id)?;
-            let d = h.direccion.clone()?;
-            (d != l.direccion).then(|| (l.id.clone(), d))
+        .map(|ip| {
+            let en_ip = |d: Option<&str>| d.and_then(ip_de_texto) == Some(*ip);
+            let hallazgo = vistas.iter().find(|v| v.hallazgo.via == Via::Wifi && en_ip(v.hallazgo.direccion.as_deref()));
+            let mac = b.vecinos.iter().find(|(v, _)| v == ip).map(|(_, m)| m.clone()).or_else(|| hallazgo.and_then(|h| h.hallazgo.mac.clone()));
+            let aparatos: Vec<&Aparato> =
+                casa.aparatos.iter().filter(|x| x.via == Via::Wifi && x.proveedor.es_local() && en_ip(x.direccion.as_deref())).collect();
+            let pistas = b.pistas.iter().filter(|(p, _)| p == ip).flat_map(|(_, v)| v.iter().cloned()).collect();
+            red::equipo(&red::Entrada {
+                ip: *ip,
+                mac,
+                propia: Some(*ip) == propia,
+                router: Some(*ip) == b.red.router,
+                pistas,
+                inverso: inversos.get(ip).cloned(),
+                hallazgo,
+                aparatos,
+            })
         })
         .collect();
-    if !movidas.is_empty() {
-        let _ = cambiar_hogar(app, |hg| {
-            for (id, d) in &movidas {
-                if let Some(l) = hg.locales.iter_mut().find(|l| l.id == *id) {
-                    l.direccion = d.clone();
-                }
-            }
-            Ok(())
-        });
+    red::ordenar(&mut equipos);
+    let mut avisos = Vec::new();
+    if propia.is_none() {
+        avisos.push("No encontré tu red local. Revisa que este equipo esté conectado al Wi-Fi o por cable.".into());
+    } else if b.vecinos.is_empty() {
+        avisos.push("No pude leer la lista de equipos de tu red; muestro solo lo que contestó.".into());
     }
-    {
-        let mut m = memoria();
-        for h in hallazgos.iter().filter(|h| h.proveedor.es_local()) {
-            if let Some(e) = h.estado {
-                m.locales.insert(h.id.clone(), (e, true));
-            }
-        }
-        m.hallazgos = hallazgos;
-    }
-    Ok(ResultadoBusqueda { hallazgos: vistas, avisos, segundos: inicio.elapsed().as_secs_f32(), estado: armar(&hogar(app)) })
+    Ok(ResultadoRed {
+        equipos,
+        ip: propia.map(|i| i.to_string()),
+        router: b.red.router.map(|i| i.to_string()),
+        prefijo: b.red.prefijo,
+        avisos,
+        segundos: inicio.elapsed().as_secs_f32(),
+        estado: casa,
+    })
 }
 
 // ---------------------------------------------------------------- Cambios de la persona
@@ -1156,58 +1483,306 @@ fn nuevo_id(prefijo: &str) -> String {
     format!("{prefijo}{ms}")
 }
 
-/// Suma a Nexo algo encontrado (solo lo que se maneja directo: WiZ, Yeelight, Govee y Bluetooth).
-pub fn agregar(app: &AppHandle, id: &str) -> Result<EstadoCasa, String> {
-    let h = memoria().hallazgos.iter().find(|h| h.id == id).cloned().ok_or("Busca de nuevo: ya no lo veo en la lista.")?;
-    if !h.proveedor.es_local() || h.manejo != Manejo::Listo {
-        return Err(match h.manejo {
-            Manejo::CuentaTuya => "Se maneja con tu cuenta de Tuya: conéctala en Ajustes › Casa.".into(),
-            Manejo::HomeAssistant { .. } => "Conecta tu Home Assistant en Ajustes › Casa.".into(),
-            Manejo::Activar { paso } => paso,
-            Manejo::Pronto { motivo } => motivo,
-            Manejo::Listo => PRONTO.into(),
-        });
-    }
+/// Una salida de un aparato: (canal, nombre, clase, forma, capacidades, Kelvin).
+type Salida = (String, Option<String>, Clase, Option<super::modelo::FormaLuz>, Capacidades, Option<(u32, u32)>);
+
+/// Lo que se guarda de un hallazgo: uno o, si tiene varias salidas (un Shelly 2PM, un Tasmota con dos relés), uno
+/// por salida. `clave`: la contraseña del aparato, si tiene.
+fn locales_de(h: &Hallazgo, clave: Option<&str>) -> Result<Vec<(Local, Option<EstadoAparato>)>, String> {
     let direccion = h.direccion.clone().ok_or("No sé cómo llegar a ese aparato; busca de nuevo.")?;
-    cambiar_hogar(app, |hg| {
-        if hg.locales.iter().any(|l| l.id == h.id) {
-            return Ok(());
+    let base = Local {
+        id: h.id.clone(),
+        proveedor: h.proveedor,
+        nombre: limpiar_nombre(&h.nombre),
+        clase: h.clase,
+        forma: h.forma,
+        marca: h.marca.clone(),
+        modelo: h.modelo.clone(),
+        direccion: direccion.split(':').next().unwrap_or(&direccion).to_string(),
+        capacidades: h.capacidades,
+        mac: h.mac.clone(),
+        canal: None,
+        puente: None,
+        puerto: direccion.split_once(':').and_then(|(_, p)| p.parse().ok()),
+        con_clave: clave.is_some(),
+        kelvin: None,
+    };
+    let ip = || lan::ip_de(&direccion);
+    // Varias salidas: "<id>/<salida>" y "<nombre> 2"; una sola: el id del aparato.
+    let varias = |salidas: Vec<Salida>| {
+        let una = salidas.len() == 1;
+        salidas
+            .into_iter()
+            .enumerate()
+            .map(|(i, (canal, nombre, clase, forma, capacidades, kelvin))| {
+                let nombre = nombre.map(|n| limpiar_nombre(&n)).filter(|n| !n.is_empty()).unwrap_or_else(|| {
+                    if una { base.nombre.clone() } else { format!("{} {}", base.nombre, i + 1) }
+                });
+                let id = if una { base.id.clone() } else { format!("{}/{canal}", base.id) };
+                (Local { id, nombre, clase, forma, capacidades, kelvin, canal: Some(canal), ..base.clone() }, None)
+            })
+            .collect::<Vec<_>>()
+    };
+    Ok(match h.proveedor {
+        Proveedor::Shelly => {
+            let info = lan::shelly::probar(ip()?).ok_or("El Shelly no responde. Busca de nuevo.")?;
+            let salidas = lan::shelly::salidas(ip()?, &info, clave)?;
+            varias(salidas.into_iter().map(|s| (s.canal, s.nombre, s.clase, s.forma, s.capacidades, s.kelvin)).collect())
         }
-        hg.locales.push(Local {
-            id: h.id.clone(),
-            proveedor: h.proveedor,
-            nombre: limpiar_nombre(&h.nombre),
-            clase: h.clase,
-            forma: h.forma,
-            marca: h.marca.clone(),
-            modelo: h.modelo.clone(),
-            direccion,
-            capacidades: h.capacidades,
-        });
+        Proveedor::Tasmota => {
+            let (_, _, estado) = lan::tasmota::detalle(ip()?, clave)?;
+            let salidas = lan::tasmota::salidas_de(&estado);
+            if salidas.is_empty() {
+                return Err("Ese aparato no tiene salidas que Nexo maneje.".into());
+            }
+            let forma = |c: Clase| (c == Clase::Luz).then_some(h.forma.unwrap_or(super::modelo::FormaLuz::Foco));
+            varias(salidas.into_iter().map(|s| (s.canal, None, s.clase, forma(s.clase), s.capacidades, None)).collect())
+        }
+        Proveedor::Lifx => vec![(Local { kelvin: lan::lifx::rango_de_modelo(h.modelo.as_deref()), ..base }, h.estado)],
+        _ => vec![(base, h.estado)],
+    })
+}
+
+/// Guarda lo nuevo (lo que ya estaba no se toca) y lo deja listo en las escenas y el menú del ícono.
+fn guardar_locales(app: &AppHandle, nuevos: Vec<(Local, Option<EstadoAparato>)>, puente: Option<Puente>) -> Result<EstadoCasa, String> {
+    cambiar_hogar(app, |hg| {
+        if let Some(p) = &puente {
+            match hg.puentes.iter_mut().find(|x| x.id == p.id) {
+                Some(x) => *x = p.clone(),
+                None => hg.puentes.push(p.clone()),
+            }
+        }
+        for (l, _) in &nuevos {
+            if !hg.locales.iter().any(|x| x.id == l.id) {
+                hg.locales.push(l.clone());
+            }
+        }
         Ok(())
     })?;
-    if let Some(e) = h.estado {
-        memoria().locales.insert(h.id.clone(), (e, true));
+    {
+        let mut m = memoria();
+        for (l, e) in &nuevos {
+            if let Some(e) = e {
+                m.locales.insert(l.id.clone(), (*e, true));
+            }
+        }
     }
     sumar_a_escenas(app);
     crate::sistema::bandeja::actualizar(app);
     Ok(armar(&hogar(app)))
 }
 
-pub fn quitar(app: &AppHandle, id: &str) -> Result<EstadoCasa, String> {
-    cambiar_hogar(app, |hg| {
-        let antes = hg.locales.len();
-        hg.locales.retain(|l| l.id != id);
-        if antes == hg.locales.len() {
-            return Err("Solo se quita lo que agregaste desde una búsqueda.".into());
+/// Suma a Nexo algo encontrado que no pide vincularse (lo de la red local y Bluetooth).
+pub fn agregar(app: &AppHandle, id: &str) -> Result<EstadoCasa, String> {
+    let h = memoria().hallazgos.iter().find(|h| h.id == id).cloned().ok_or("Busca de nuevo: ya no lo veo en la lista.")?;
+    if !h.proveedor.es_local() || h.manejo != Manejo::Listo {
+        return Err(match h.manejo {
+            Manejo::CuentaTuya => "Funciona solo con la nube de Tuya. Mira las opciones en la lista.".into(),
+            Manejo::HomeAssistant { .. } => "Conecta tu Home Assistant en Ajustes › Casa.".into(),
+            Manejo::Activar { paso } => paso,
+            Manejo::Pronto { motivo } => motivo,
+            Manejo::Vincular { paso, .. } => paso,
+            Manejo::Listo => PRONTO.into(),
+        });
+    }
+    if ya_esta(&hogar(app), &h.id) {
+        return Ok(armar(&hogar(app)));
+    }
+    if ejemplo::activo() {
+        return guardar_locales(app, vec![(locales_ejemplo(&h), h.estado)], None);
+    }
+    let nuevos = locales_de(&h, None)?;
+    guardar_locales(app, nuevos, None)
+}
+
+/// Lo de ejemplo se guarda sin preguntar nada por la red.
+fn locales_ejemplo(h: &Hallazgo) -> Local {
+    Local {
+        id: h.id.clone(),
+        proveedor: h.proveedor,
+        nombre: limpiar_nombre(&h.nombre),
+        clase: h.clase,
+        forma: h.forma,
+        marca: h.marca.clone(),
+        modelo: h.modelo.clone(),
+        direccion: h.direccion.clone().unwrap_or_default(),
+        capacidades: h.capacidades,
+        mac: h.mac.clone(),
+        canal: None,
+        puente: None,
+        puerto: None,
+        con_clave: false,
+        kelvin: None,
+    }
+}
+
+fn no_listo(app: &AppHandle, mensaje: &str) -> ResultadoVinculo {
+    ResultadoVinculo { listo: false, mensaje: mensaje.into(), estado: armar(&hogar(app)) }
+}
+
+/// Un intento de vincular un puente Hue: la primera vez se fija su certificado; luego se pide la clave (si ya se
+/// presionó el botón) y se agregan todas sus luces.
+fn vincular_hue(app: &AppHandle, h: &Hallazgo, ip: std::net::Ipv4Addr) -> Result<ResultadoVinculo, String> {
+    let fijada = memoria().huellas.get(&h.id).copied();
+    let mut p = lan::hue::Puente::nuevo(ip, h.modelo.as_deref(), fijada);
+    let (config, huella) = lan::hue::config(&p)?;
+    let (bridgeid, nombre, mac, modelo) = lan::hue::identidad(&config).ok_or("El puente Hue contestó algo que no entiendo.")?;
+    let puente_id = format!("hue:{bridgeid}");
+    // Si mDNS dijo cuál es, tiene que ser el mismo (si no, otro equipo está contestando en esa IP).
+    let por_mdns = h.id.strip_prefix("hue:").is_some_and(|x| x.len() == 16 && x.chars().all(|c| c.is_ascii_hexdigit()));
+    if por_mdns && h.id != puente_id {
+        return Err("Ese no es el puente que encontré. Busca de nuevo.".into());
+    }
+    if let Some(x) = huella {
+        p.huella = Some(x);
+        memoria().huellas.insert(h.id.clone(), x);
+    }
+    let (vinculo, _) = lan::hue::vincular(&p)?;
+    let lan::hue::Vinculo::Clave(usuario) = vinculo else {
+        return Ok(no_listo(app, "Todavía no veo el botón presionado."));
+    };
+    guardar_clave(&puente_id, &usuario)?;
+    let (luces, salas) = lan::hue::leer_todo(&p, &usuario)?;
+    let puente = Puente {
+        id: puente_id.clone(),
+        proveedor: Proveedor::Hue,
+        nombre,
+        direccion: ip.to_string(),
+        mac: mac.or_else(|| h.mac.clone()),
+        modelo: modelo.or_else(|| h.modelo.clone()),
+        huella: p.huella.map(|x| hex(&x)),
+    };
+    let nuevos: Vec<(Local, Option<EstadoAparato>)> = luces
+        .iter()
+        .map(|l| {
+            let id = l.unico.as_ref().map(|u| format!("hue:{u}")).unwrap_or_else(|| format!("{puente_id}/{}", l.numero));
+            let local = Local {
+                id,
+                proveedor: Proveedor::Hue,
+                nombre: limpiar_nombre(&l.nombre),
+                clase: l.clase,
+                forma: l.forma,
+                marca: "Philips Hue".into(),
+                modelo: l.modelo.clone(),
+                direccion: ip.to_string(),
+                capacidades: l.capacidades,
+                mac: None,
+                canal: Some(l.numero.clone()),
+                puente: Some(puente_id.clone()),
+                puerto: None,
+                con_clave: true,
+                kelvin: l.kelvin,
+            };
+            (local, l.alcanzable.then_some(l.estado))
+        })
+        .collect();
+    let n = nuevos.len();
+    {
+        let mut m = memoria();
+        for (l, _) in &nuevos {
+            if let Some(numero) = l.canal.as_deref()
+                && let Some((sala, _)) = salas.iter().find(|(_, ls)| ls.iter().any(|x| x == numero))
+            {
+                m.salas_hue.insert(l.id.clone(), sala.clone());
+            }
         }
+        m.huellas.remove(&h.id);
+    }
+    let estado = guardar_locales(app, nuevos, Some(puente))?;
+    let mensaje = match n {
+        0 => "Listo: vinculé el puente Hue. Todavía no tiene luces.".to_string(),
+        1 => "Listo: agregué 1 luz del puente Hue.".to_string(),
+        n => format!("Listo: agregué {n} luces del puente Hue."),
+    };
+    Ok(ResultadoVinculo { listo: true, mensaje, estado })
+}
+
+/// Un intento de vincular una Nanoleaf (después de mantener su botón de encendido).
+fn vincular_nanoleaf(app: &AppHandle, h: &Hallazgo, ip: std::net::Ipv4Addr) -> Result<ResultadoVinculo, String> {
+    let puerto = h.direccion.as_deref().and_then(|d| d.split_once(':')).and_then(|(_, p)| p.parse().ok()).unwrap_or(lan::nanoleaf::PUERTO);
+    let lan::nanoleaf::Vinculo::Token(token) = lan::nanoleaf::vincular(ip, puerto)? else {
+        return Ok(no_listo(app, "Todavía no veo la Nanoleaf lista para vincular."));
+    };
+    let datos = lan::nanoleaf::info(ip, puerto, &token)?;
+    let info = lan::nanoleaf::info_de(&datos).ok_or("La Nanoleaf contestó algo que no entiendo.")?;
+    guardar_clave(&h.id, &token)?;
+    let mut nuevos = locales_de(h, Some(&token))?;
+    for (l, e) in &mut nuevos {
+        l.nombre = limpiar_nombre(&info.nombre);
+        l.modelo = info.modelo.clone().or(l.modelo.take());
+        l.kelvin = Some(info.kelvin);
+        *e = Some(lan::nanoleaf::estado_de(&datos, info.kelvin));
+    }
+    let nombre = info.nombre.clone();
+    let estado = guardar_locales(app, nuevos, None)?;
+    Ok(ResultadoVinculo { listo: true, mensaje: format!("Listo: agregué {nombre}."), estado })
+}
+
+/// Vincula algo encontrado: con su botón (Hue, Nanoleaf: un intento por llamada) o con su contraseña (Shelly,
+/// Tasmota, OpenBeken). Lo que no pide nada se agrega directo.
+pub fn vincular(app: &AppHandle, id: &str, clave: Option<&str>) -> Result<ResultadoVinculo, String> {
+    let h = memoria().hallazgos.iter().find(|h| h.id == id).cloned().ok_or("Busca de nuevo: ya no lo veo en la lista.")?;
+    if ya_esta(&hogar(app), &h.id) {
+        return Ok(ResultadoVinculo { listo: true, mensaje: "Ya está en Nexo.".into(), estado: armar(&hogar(app)) });
+    }
+    if ejemplo::activo() {
+        let estado = guardar_locales(app, vec![(locales_ejemplo(&h), h.estado)], None)?;
+        return Ok(ResultadoVinculo { listo: true, mensaje: format!("Listo: agregué {}.", h.nombre), estado });
+    }
+    let ip = lan::ip_de(h.direccion.as_deref().unwrap_or_default())?;
+    match (&h.manejo, h.proveedor) {
+        (Manejo::Vincular { .. }, Proveedor::Hue) => vincular_hue(app, &h, ip),
+        (Manejo::Vincular { .. }, Proveedor::Nanoleaf) => vincular_nanoleaf(app, &h, ip),
+        (Manejo::Vincular { .. }, Proveedor::Shelly | Proveedor::Tasmota) => {
+            let clave = clave.map(str::trim).filter(|c| !c.is_empty() && c.len() <= 128).ok_or("Escribe la contraseña del aparato.")?;
+            let nuevos = locales_de(&h, Some(clave))?;
+            guardar_clave(&h.id, clave)?;
+            let n = nuevos.len();
+            let estado = guardar_locales(app, nuevos, None)?;
+            let mensaje = if n == 1 { format!("Listo: agregué {}.", h.nombre) } else { format!("Listo: agregué {n} salidas de {}.", h.nombre) };
+            Ok(ResultadoVinculo { listo: true, mensaje, estado })
+        }
+        (Manejo::Listo, _) => {
+            let estado = agregar(app, id)?;
+            Ok(ResultadoVinculo { listo: true, mensaje: format!("Listo: agregué {}.", h.nombre), estado })
+        }
+        (Manejo::Activar { paso }, _) | (Manejo::Pronto { motivo: paso }, _) => Err(paso.clone()),
+        _ => Err("Eso no se vincula desde aquí.".into()),
+    }
+}
+
+/// Quita de Nexo algo agregado desde una búsqueda. Si era lo último que usaba una clave o un puente, se borran.
+pub fn quitar(app: &AppHandle, id: &str) -> Result<EstadoCasa, String> {
+    let mut sobra_clave: Option<String> = None;
+    cambiar_hogar(app, |hg| {
+        let Some(l) = hg.locales.iter().find(|l| l.id == id).cloned() else {
+            return Err("Solo se quita lo que agregaste desde una búsqueda.".into());
+        };
+        hg.locales.retain(|x| x.id != id);
         hg.aparatos.remove(id);
         for g in &mut hg.grupos {
             g.aparatos.retain(|x| x != id);
         }
+        if let Some(p) = &l.puente
+            && !hg.locales.iter().any(|x| x.puente.as_ref() == Some(p))
+        {
+            hg.puentes.retain(|x| x.id != *p);
+        }
+        let cuenta = cuenta_clave(&l);
+        if l.con_clave && !hg.locales.iter().any(|x| x.con_clave && cuenta_clave(x) == cuenta) {
+            sobra_clave = Some(cuenta);
+        }
         Ok(())
     })?;
-    memoria().locales.remove(id);
+    if let Some(c) = sobra_clave {
+        let _ = llavero::borrar(llavero::Clave::Aparato, &c);
+        memoria().claves.remove(&c);
+    }
+    {
+        let mut m = memoria();
+        m.locales.remove(id);
+        m.salas_hue.remove(id);
+    }
     Ok(armar(&hogar(app)))
 }
 

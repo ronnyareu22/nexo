@@ -147,6 +147,7 @@ pub fn hallazgos() -> Vec<Hallazgo> {
         nombre: nombre.into(),
         modelo: None,
         direccion: None,
+        mac: None,
         senal: None,
         version: None,
         capacidades: Capacidades::ninguna(),

@@ -307,6 +307,8 @@ pub fn run() {
             sistema::hogar::hogar_ejecutar,
             sistema::hogar::hogar_buscar,
             sistema::hogar::hogar_agregar,
+            sistema::hogar::hogar_vincular,
+            sistema::hogar::hogar_red,
             sistema::hogar::hogar_quitar,
             sistema::hogar::hogar_editar,
             sistema::hogar::hogar_guardar_grupo,

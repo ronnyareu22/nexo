@@ -166,6 +166,7 @@ pub fn hallazgo(r: &Respuesta, ip: Ipv4Addr, d: Option<&Descripcion>) -> Hallazg
         nombre,
         modelo: d.and_then(|d| d.modelo.clone()),
         direccion: Some(ip.to_string()),
+        mac: None,
         senal: None,
         version: None,
         capacidades: Capacidades::ninguna(),

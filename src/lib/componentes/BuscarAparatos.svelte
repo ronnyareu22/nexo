@@ -3,8 +3,10 @@
   - Mientras busca: una línea que se llena una sola vez en 6 s (sin bucles) y, en la Mac, cómo responder al aviso de
     red local de macOS.
   - Lo encontrado: su dibujo, nombre, marca y qué es, la IP o "Bluetooth", la señal en palabras y si Nexo lo maneja:
-    "Lista para usar" con Agregar, "Ya está en Nexo", conectar Tuya o Home Assistant, lo que falta activar en su
-    app, o por qué todavía no.
+    "Lista para usar" con Agregar, Vincular (con su botón o su contraseña: VincularAparato.svelte), "Ya está en
+    Nexo", conectar Home Assistant, lo que falta activar en su app, o por qué todavía no.
+  - Lo de Tuya solo funciona con su nube: "Ver opciones" (OpcionesTuya.svelte), sin pedir la cuenta.
+  - Abajo, primero lo de tu red: que esté encendido y en el mismo Wi-Fi, y el «Control LAN» de Yeelight y Govee.
   Empieza a buscar al aparecer; quien lo usa lo vuelve a crear para buscar de nuevo.
 -->
 <script lang="ts">
@@ -15,6 +17,8 @@
   import type { EstadoCasa, Hallazgo } from '$lib/tipos-hogar';
   import Icono from './Icono.svelte';
   import IlustracionAparato from './IlustracionAparato.svelte';
+  import OpcionesTuya from './OpcionesTuya.svelte';
+  import VincularAparato from './VincularAparato.svelte';
 
   let {
     onestado,
@@ -37,6 +41,10 @@
   let hallazgos = $state<Hallazgo[]>([]);
   let avisos = $state<string[]>([]);
   let agregando = $state<string | null>(null);
+  let vinculando = $state<Hallazgo | null>(null);
+  /** Lo de Tuya con sus opciones abiertas (por id). */
+  let abiertas = $state<string[]>([]);
+  const uid = $props.id();
 
   onMount(() => {
     // Un solo llenado de 6 s: se pone en marcha en el cuadro siguiente.
@@ -56,15 +64,21 @@
     };
   });
 
+  const marcarAgregado = (id: string) => (hallazgos = hallazgos.map((x) => (x.id === id ? { ...x, agregado: true } : x)));
+
   async function agregar(h: Hallazgo) {
     agregando = h.id;
     try {
       onestado(await agregarAparato(h.id));
-      hallazgos = hallazgos.map((x) => (x.id === h.id ? { ...x, agregado: true } : x));
+      marcarAgregado(h.id);
     } catch (e) {
       onerror(String(e));
     }
     agregando = null;
+  }
+
+  function alternarOpciones(id: string) {
+    abiertas = abiertas.includes(id) ? abiertas.filter((x) => x !== id) : [...abiertas, id];
   }
 
   function conectarHa(url: string) {
@@ -86,9 +100,9 @@
     return [h.marca, que, donde, senal(h.senal)].filter(Boolean).join(' · ');
   }
 
-  // Primero lo que se puede usar ya; luego lo que pide algo; al final lo que solo se ve.
+  // Primero lo que se agrega ya (o se vincula una vez); luego lo que pide algo; al final lo que solo se ve.
   const peso = (h: Hallazgo) =>
-    h.manejo.tipo === 'listo' ? (h.agregado ? 1 : 0) : h.manejo.tipo === 'pronto' ? 3 : 2;
+    h.manejo.tipo === 'listo' || h.manejo.tipo === 'vincular' ? (h.agregado ? 1 : 0) : h.manejo.tipo === 'pronto' ? 3 : 2;
   const ordenados = $derived([...hallazgos].sort((a, b) => peso(a) - peso(b)));
 </script>
 
@@ -131,6 +145,7 @@
     {#if ordenados.length}
       <ul class="lista">
         {#each ordenados as h (h.id)}
+          {@const abierta = abiertas.includes(h.id)}
           <li class="hallazgo">
             <span class="mini" aria-hidden="true">
               <IlustracionAparato
@@ -160,9 +175,25 @@
                     {agregando === h.id ? 'Agregando…' : 'Agregar'}
                   </button>
                 {/if}
+              {:else if h.manejo.tipo === 'vincular'}
+                {#if h.agregado}
+                  <span class="estado ok"><Icono nombre="check-circulo" tamano={15} />Ya está en Nexo</span>
+                {:else}
+                  <span class="estado">{h.manejo.forma === 'boton' ? 'Se vincula con su botón' : 'Pide su contraseña'}</span>
+                  <button type="button" class="boton-primario chico" onclick={() => (vinculando = h)}>Vincular</button>
+                {/if}
               {:else if h.manejo.tipo === 'cuentaTuya'}
-                <span class="estado">Conecta tu cuenta Tuya para manejarla</span>
-                <button type="button" class="boton chico" onclick={() => onir('ajustes', 'casa')}>Conectar Tuya</button>
+                <span class="estado tenue">Solo funciona con la nube de Tuya</span>
+                <button
+                  type="button"
+                  class="boton chico"
+                  aria-expanded={abierta}
+                  aria-controls="{uid}-tuya-{h.id}"
+                  onclick={() => alternarOpciones(h.id)}
+                >
+                  Ver opciones
+                  <span class="giro" class:abierta><Icono nombre="chevron-abajo" tamano={14} /></span>
+                </button>
               {:else if h.manejo.tipo === 'homeAssistant'}
                 {@const url = h.manejo.url}
                 {#if h.agregado}
@@ -177,21 +208,35 @@
                 <span class="estado tenue">{h.manejo.motivo}</span>
               {/if}
             </span>
+            {#if h.manejo.tipo === 'cuentaTuya' && abierta}
+              <div class="opciones"><OpcionesTuya id="{uid}-tuya-{h.id}" {onir} /></div>
+            {/if}
           </li>
         {/each}
       </ul>
     {:else}
-      <p class="nota">No encontré aparatos nuevos. Revisa que estén encendidos y en la misma red Wi-Fi que este equipo.</p>
+      <p class="nota">No encontré aparatos nuevos.</p>
     {/if}
     <p class="nota pista">
       <Icono nombre="info" tamano={14} />
-      <span>¿Tienes luces Yeelight o Govee? Activa «Control LAN» en su app para que Nexo las encuentre.</span>
+      <span>
+        ¿No aparece? Revisa que esté encendido y en la misma red Wi-Fi. Las luces Yeelight y Govee necesitan «Control
+        LAN» en su app.
+      </span>
     </p>
   {/if}
 </section>
 
+<VincularAparato
+  hallazgo={vinculando}
+  {onestado}
+  onvinculado={marcarAgregado}
+  oncerrar={() => (vinculando = null)}
+/>
+
 <style>
   .busqueda {
+    container-type: inline-size;
     display: grid;
     gap: 12px;
     padding: 14px 16px 16px;
@@ -377,5 +422,22 @@
   .aviso-texto {
     max-width: 320px;
     color: var(--aviso);
+  }
+  .giro {
+    display: inline-grid;
+    transition: transform var(--dur-color) ease;
+  }
+  .giro.abierta {
+    transform: rotate(180deg);
+  }
+  .opciones {
+    flex: 1 1 100%;
+    min-width: 0;
+    padding-left: 56px;
+  }
+  @container (max-width: 520px) {
+    .opciones {
+      padding-left: 0;
+    }
   }
 </style>

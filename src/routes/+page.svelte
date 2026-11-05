@@ -103,7 +103,7 @@
   let seccion = $state<Seccion>(
     aparatoPedido ? 'dispositivos' : esSeccion(pedida) ? pedida : seccionGuardada(),
   );
-  // Lo que se pidió al ir a Casa ("buscar") o a Ajustes ("casa"); fuera de la app, `?pedido=`.
+  // Lo que se pidió al ir a Casa ("buscar" o "red") o a Ajustes ("casa"); fuera de la app, `?pedido=`.
   let pedido = $state<string | null>(parametros.get('pedido'));
   // El aparato elegido en Dispositivos: se mantiene al ir y volver de otras secciones.
   let dispositivoElegido = $state<string | null>(aparatoPedido);
@@ -190,7 +190,7 @@
   // sin aparato (la barra lateral, "Ver todos") vuelve a la lista.
   function ir(destino: string, id?: string) {
     if (!esSeccion(destino)) return;
-    // Casa con "buscar" empieza la búsqueda; Ajustes con "casa" va a la sección de las cuentas de la casa.
+    // Casa con "buscar" empieza la búsqueda y con "red" abre Tu red; Ajustes con "casa" va a la sección de la casa.
     pedido = destino === 'casa' || destino === 'ajustes' ? (id ?? null) : null;
     if (destino === 'dispositivos') {
       if (id) dispositivoElegido = id;
@@ -371,7 +371,12 @@
             {:else if seccion === 'setup'}
               <VistaSetup {estado} {pantallas} onir={ir} onerror={mostrarAviso} />
             {:else if seccion === 'casa'}
-              <VistaCasa buscarAlEntrar={pedido === 'buscar'} onir={ir} onerror={mostrarAviso} />
+              <VistaCasa
+                buscarAlEntrar={pedido === 'buscar'}
+                abrirRedAlEntrar={pedido === 'red'}
+                onir={ir}
+                onerror={mostrarAviso}
+              />
             {:else if seccion === 'dispositivos'}
               <VistaDispositivos
                 {estado}

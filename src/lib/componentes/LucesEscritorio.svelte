@@ -1,7 +1,8 @@
 <!--
   Las luces del escritorio, en Mi setup: las de la habitación Escritorio (o del grupo con ese nombre), en tarjetas
   compactas con su interruptor y su brillo, y encender o apagar todas juntas. Todo lo demás está en Casa.
-  - Sin cuentas ni luces: un estado calmo con "Conectar luces" (lleva a Ajustes › Casa) y "Buscar aparatos".
+  - Sin nada en la casa todavía: un estado calmo que empieza por lo de tu red, sin cuentas: "Buscar aparatos" y
+    "Ver tu red" (los dos llevan a Casa).
   - Con luces, pero ninguna en el escritorio: cómo ponerlas ahí (en Casa).
 -->
 <script lang="ts">
@@ -100,16 +101,19 @@
             <button type="button" class="boton-primario" onclick={() => onir('casa')}>Ir a Casa</button>
           </div>
         {:else}
-          <p class="vacio__titulo">Conecta tus luces</p>
+          <p class="vacio__titulo">Trae tus luces</p>
           <p class="vacio__texto">
-            Con tu cuenta de Tuya / Smart Life o tu Home Assistant, o buscando en tu red las de WiZ, Yeelight, Govee y
-            las tiras Bluetooth. Mi setup sigue funcionando igual sin luces.
+            Nexo encuentra las de tu mismo Wi-Fi (Philips Hue, Elgato, WLED, LIFX, Nanoleaf, WiZ, Yeelight, Govee…) y las
+            tiras Bluetooth, sin cuentas ni nube. Mi setup sigue funcionando igual sin luces.
           </p>
           <div class="vacio__botones">
-            <button type="button" class="boton-primario" onclick={() => onir('ajustes', 'casa')}>Conectar luces</button>
-            <button type="button" class="boton-vidrio boton" onclick={() => onir('casa', 'buscar')}>
+            <button type="button" class="boton-primario" onclick={() => onir('casa', 'buscar')}>
               <Icono nombre="buscar" tamano={15} />
               Buscar aparatos
+            </button>
+            <button type="button" class="boton-vidrio boton" onclick={() => onir('casa', 'red')}>
+              <Icono nombre="red" tamano={15} />
+              Ver tu red
             </button>
           </div>
         {/if}

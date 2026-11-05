@@ -1,9 +1,12 @@
 <!--
-  Ajustes › Casa: buscar aparatos y las dos cuentas de la casa, en filas como el resto de Ajustes.
-  - Tuya / Smart Life: los pasos para crear el proyecto en iot.tuya.com y vincular la app, Access ID, Access Secret
-    (oculto, nunca se vuelve a mostrar: va al llavero del sistema) y el centro de datos, con "Detectar".
-  - Home Assistant: los pasos para crear un token de larga duración, la dirección (la que trae la búsqueda, si la
-    hubo) y el token (también al llavero). Gratis y en tu red: nunca por Nabu Casa.
+  Ajustes › Casa, en filas como el resto de Ajustes. Primero lo de tu red, sin cuentas:
+  - "Buscar aparatos" y "Tu red" (llevan a Casa con la búsqueda o con Tu red abiertas).
+  - Home Assistant (opcional): los pasos para crear un token de larga duración, la dirección (la que trae la
+    búsqueda, si la hubo) y el token (al llavero del sistema). Gratis y en tu red: nunca por Nabu Casa.
+  - "Otras cuentas (opcional)", cerrada de entrada (se abre sola si Tuya tiene un aviso o si se llega desde "Ver
+    opciones" de un aparato Tuya): Tuya / Smart Life, con los pasos para crear el proyecto en iot.tuya.com y vincular
+    la app, Access ID, Access Secret (oculto, nunca se vuelve a mostrar: va al llavero) y el centro de datos, con
+    "Detectar". Cerrada, su línea dice si Tuya está conectada.
   - Conectadas: lo que se ve de cada una, el error en palabras si lo hay y "Desconectar" con confirmación.
   Lleva el id "ajustes-casa": Ajustes baja hasta aquí cuando se llega desde Casa o Mi setup.
 -->
@@ -19,8 +22,11 @@
 
   let estado = $state<EstadoCasa | null>(null);
 
+  // --- Otras cuentas (Tuya): cerradas de entrada ---
+  let otras = $state(false);
+
   // --- Tuya ---
-  let formTuya = $state(true);
+  let formTuya = $state(false);
   let accessId = $state('');
   let secreto = $state('');
   let region = $state('auto');
@@ -40,6 +46,15 @@
   const ha = $derived(estado?.homeAssistant ?? null);
   const cuantos = (p: string) => estado?.aparatos.filter((a) => a.proveedor === p).length ?? 0;
   const aparatos = (n: number) => `${n} ${n === 1 ? 'aparato' : 'aparatos'}`;
+
+  /** La línea de "Otras cuentas": si Tuya está conectada, se dice aunque esté cerrada. */
+  const resumenOtras = $derived(
+    tuya
+      ? estado?.errorTuya
+        ? 'Tuya / Smart Life conectada · tiene un aviso'
+        : `Tuya / Smart Life conectada · ${aparatos(cuantos('tuya'))}`
+      : 'Tuya / Smart Life, para lo que solo funciona con su nube. Lo de tu red no la necesita.',
+  );
 
   const regiones = $derived([
     { valor: 'auto', nombre: 'Detectar', detalle: 'Prueba cada centro de datos' },
@@ -95,17 +110,26 @@
     preguntando = null;
     try {
       estado = cual === 'tuya' ? await desconectarTuya() : await desconectarHa();
-      if (cual === 'tuya') formTuya = true;
+      if (cual === 'tuya') formTuya = false;
     } catch (err) {
       onerror(String(err));
     }
   }
 
   onMount(() => {
+    // Desde "Ver opciones" de un aparato Tuya: "Otras cuentas" abierta y Tuya lista para conectar.
+    let pidioTuya = false;
+    try {
+      pidioTuya = sessionStorage.getItem('nexo-abrir-tuya') === '1';
+      sessionStorage.removeItem('nexo-abrir-tuya');
+    } catch {
+      // Sin almacenamiento: se abre a mano.
+    }
     leerCasa(false)
       .then((e) => {
         estado = e;
-        formTuya = !e.tuya;
+        otras = pidioTuya || !!e.errorTuya;
+        formTuya = pidioTuya && !e.tuya;
       })
       .catch((e) => onerror(String(e)));
     // La dirección de un Home Assistant encontrado al buscar.
@@ -127,7 +151,10 @@
   <div class="fila">
     <div class="textos">
       <div class="titulo">Buscar aparatos</div>
-      <div class="ayuda">Luces WiZ, Yeelight y Govee, tiras Bluetooth, teles y Home Assistant en tu red. Tarda unos segundos.</div>
+      <div class="ayuda">
+        Luces y enchufes de tu Wi-Fi (Philips Hue, LIFX, Nanoleaf, Elgato, WLED, Shelly, WiZ, Yeelight, Govee, Tasmota),
+        tiras Bluetooth y Home Assistant. Sin cuentas; tarda unos segundos.
+      </div>
     </div>
     <button class="boton-vidrio boton" type="button" onclick={() => onir?.('casa', 'buscar')}>
       <Icono nombre="buscar" tamano={15} />
@@ -135,85 +162,27 @@
     </button>
   </div>
 
+  <div class="fila separada">
+    <div class="textos">
+      <div class="titulo">Tu red</div>
+      <div class="ayuda">Todo lo que está conectado a tu Wi-Fi: qué es, su IP y si Nexo lo puede manejar.</div>
+    </div>
+    <button class="boton-vidrio boton" type="button" onclick={() => onir?.('casa', 'red')}>
+      <Icono nombre="red" tamano={15} />
+      Ver tu red
+    </button>
+  </div>
+
   {#if !estado}
     <div class="cuenta cargando" aria-busy="true"><span class="linea"></span><span class="solo-lector">Leyendo tus cuentas…</span></div>
   {:else}
-  <!-- ---------- Tuya / Smart Life ---------- -->
-  <div class="cuenta">
-    <div class="fila">
-      <div class="textos">
-        <div class="titulo con-punto">
-          <span class="punto-estado" class:ok={!!tuya && !estado?.errorTuya} class:aviso={!!tuya && !!estado?.errorTuya} aria-hidden="true"></span>
-          <span>Tuya / Smart Life</span>
-        </div>
-        <div class="ayuda">
-          {tuya
-            ? `Conectada · ${aparatos(cuantos('tuya'))} · ${tuya.regionNombre || tuya.region}`
-            : 'Tus luces y enchufes de la app Smart Life o Tuya, con tu cuenta.'}
-        </div>
-      </div>
-      {#if tuya}
-        <button class="boton-vidrio boton peligro" type="button" onclick={() => (preguntando = 'tuya')}>Desconectar</button>
-      {:else if !formTuya}
-        <button class="boton-vidrio boton" type="button" onclick={() => (formTuya = true)}>Conectar</button>
-      {/if}
-    </div>
-
-    {#if tuya}
-      <dl class="datos">
-        <div><dt>Access ID</dt><dd class="clave">{tuya.accessId}</dd></div>
-        <div><dt>Access Secret</dt><dd>Guardado en el llavero de este equipo</dd></div>
-      </dl>
-      {#if estado?.errorTuya}<p class="error-cuenta" role="status"><Icono nombre="alerta" tamano={15} /><span>{estado.errorTuya}</span></p>{/if}
-    {:else if formTuya}
-      <ol class="pasos">
-        <li>Entra a <b>iot.tuya.com</b> con una cuenta (es aparte de la de la app).</li>
-        <li>
-          En <b>Cloud › Development</b>, crea un proyecto <b>Smart Home</b> con el centro de datos de tu cuenta. En Smart
-          Life lo ves en Yo › Configuración › Cuenta y seguridad › Región.
-        </li>
-        <li>
-          En el proyecto, abre <b>Devices › Link Tuya App Account › Add App Account</b> y escanea el código con Smart
-          Life (Yo › ícono de escanear).
-        </li>
-        <li>En <b>Overview</b>, copia el Access ID y el Access Secret.</li>
-        <li>Pégalos aquí y toca Conectar.</li>
-      </ol>
-      <p class="nota">
-        La prueba gratis de Tuya dura cerca de un mes y se renueva gratis en iot.tuya.com. Da unas 26 000 consultas al mes:
-        Nexo pregunta solo mientras miras tu casa.
-      </p>
-      <form class="formulario" onsubmit={conectarCuentaTuya}>
-        <label class="campo">
-          <span class="campo__rotulo">Access ID</span>
-          <input type="text" bind:value={accessId} autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="Client ID del proyecto" />
-        </label>
-        <label class="campo">
-          <span class="campo__rotulo">Access Secret</span>
-          <input type="password" bind:value={secreto} autocomplete="off" spellcheck="false" placeholder="Se guarda en el llavero" />
-        </label>
-        <div class="campo">
-          <span class="campo__rotulo">Centro de datos</span>
-          <MenuDesplegable opciones={regiones} valor={region} etiqueta="Centro de datos de tu cuenta" oncambio={(v) => (region = v)} />
-        </div>
-        {#if errorTuya}<p class="error-campo" role="alert">{errorTuya}</p>{/if}
-        <div class="enviar">
-          <button class="boton-primario" type="submit" disabled={conectandoTuya} aria-busy={conectandoTuya}>
-            {conectandoTuya ? 'Conectando…' : 'Conectar'}
-          </button>
-          {#if region === 'auto'}<span class="ayuda">Detectar prueba cada centro de datos: puede tardar unos 20 segundos.</span>{/if}
-        </div>
-      </form>
-    {/if}
-  </div>
-
   <!-- ---------- Home Assistant ---------- -->
   <div class="cuenta">
     <div class="fila">
       <div class="textos">
         <div class="titulo con-punto">
           <span class="punto-estado" class:ok={!!ha && !estado?.errorHa} class:aviso={!!ha && !!estado?.errorHa} aria-hidden="true"></span>
-          <span>Home Assistant</span>
+          <span>Home Assistant <span class="opcional">(opcional)</span></span>
         </div>
         <div class="ayuda">
           {ha
@@ -257,6 +226,95 @@
       </form>
     {/if}
   </div>
+
+  <!-- ---------- Otras cuentas (opcional): Tuya / Smart Life ---------- -->
+  <div class="cuenta">
+    <div class="fila">
+      <div class="textos">
+        <div class="titulo">Otras cuentas <span class="opcional">(opcional)</span></div>
+        <div class="ayuda">{resumenOtras}</div>
+      </div>
+      <button
+        class="boton-vidrio boton"
+        type="button"
+        aria-expanded={otras}
+        aria-controls="ajustes-otras-cuentas"
+        onclick={() => (otras = !otras)}
+      >
+        {otras ? 'Ocultar' : 'Mostrar'}
+        <span class="giro" class:abierta={otras}><Icono nombre="chevron-abajo" tamano={15} /></span>
+      </button>
+    </div>
+    {#if otras}
+      <div class="cuenta sub" id="ajustes-otras-cuentas">
+        <div class="fila">
+          <div class="textos">
+            <div class="titulo con-punto">
+              <span class="punto-estado" class:ok={!!tuya && !estado?.errorTuya} class:aviso={!!tuya && !!estado?.errorTuya} aria-hidden="true"></span>
+              <span>Tuya / Smart Life</span>
+            </div>
+            <div class="ayuda">
+              {tuya
+                ? `Conectada · ${aparatos(cuantos('tuya'))} · ${tuya.regionNombre || tuya.region}`
+                : 'Los aparatos de la app Smart Life o Tuya, por su nube y con tu cuenta.'}
+            </div>
+          </div>
+          {#if tuya}
+            <button class="boton-vidrio boton peligro" type="button" onclick={() => (preguntando = 'tuya')}>Desconectar</button>
+          {:else if !formTuya}
+            <button class="boton-vidrio boton" type="button" onclick={() => (formTuya = true)}>Conectar</button>
+          {/if}
+        </div>
+
+        {#if tuya}
+          <dl class="datos">
+            <div><dt>Access ID</dt><dd class="clave">{tuya.accessId}</dd></div>
+            <div><dt>Access Secret</dt><dd>Guardado en el llavero de este equipo</dd></div>
+          </dl>
+          {#if estado?.errorTuya}<p class="error-cuenta" role="status"><Icono nombre="alerta" tamano={15} /><span>{estado.errorTuya}</span></p>{/if}
+        {:else if formTuya}
+          <ol class="pasos">
+            <li>Entra a <b>iot.tuya.com</b> con una cuenta (es aparte de la de la app).</li>
+            <li>
+              En <b>Cloud › Development</b>, crea un proyecto <b>Smart Home</b> con el centro de datos de tu cuenta. En Smart
+              Life lo ves en Yo › Configuración › Cuenta y seguridad › Región.
+            </li>
+            <li>
+              En el proyecto, abre <b>Devices › Link Tuya App Account › Add App Account</b> y escanea el código con Smart
+              Life (Yo › ícono de escanear).
+            </li>
+            <li>En <b>Overview</b>, copia el Access ID y el Access Secret.</li>
+            <li>Pégalos aquí y toca Conectar.</li>
+          </ol>
+          <p class="nota">
+            La prueba gratis de Tuya dura cerca de un mes y se renueva gratis en iot.tuya.com. Da unas 26 000 consultas al mes:
+            Nexo pregunta solo mientras miras tu casa.
+          </p>
+          <form class="formulario" onsubmit={conectarCuentaTuya}>
+            <label class="campo">
+              <span class="campo__rotulo">Access ID</span>
+              <input type="text" bind:value={accessId} autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="Client ID del proyecto" />
+            </label>
+            <label class="campo">
+              <span class="campo__rotulo">Access Secret</span>
+              <input type="password" bind:value={secreto} autocomplete="off" spellcheck="false" placeholder="Se guarda en el llavero" />
+            </label>
+            <div class="campo">
+              <span class="campo__rotulo">Centro de datos</span>
+              <MenuDesplegable opciones={regiones} valor={region} etiqueta="Centro de datos de tu cuenta" oncambio={(v) => (region = v)} />
+            </div>
+            {#if errorTuya}<p class="error-campo" role="alert">{errorTuya}</p>{/if}
+            <div class="enviar">
+              <button class="boton-primario" type="submit" disabled={conectandoTuya} aria-busy={conectandoTuya}>
+                {conectandoTuya ? 'Conectando…' : 'Conectar'}
+              </button>
+              {#if region === 'auto'}<span class="ayuda">Detectar prueba cada centro de datos: puede tardar unos 20 segundos.</span>{/if}
+            </div>
+          </form>
+        {/if}
+      </div>
+    {/if}
+  </div>
   {/if}
 </section>
 
@@ -287,6 +345,25 @@
     gap: 10px;
     padding-bottom: 12px;
     border-top: 1px solid var(--borde);
+  }
+  /* Tuya, dentro de "Otras cuentas": su raya va un poco más adentro. */
+  .cuenta.sub {
+    margin-left: 12px;
+    padding-bottom: 0;
+  }
+  .separada {
+    border-top: 1px solid var(--borde);
+  }
+  .opcional {
+    font-weight: 500;
+    color: var(--texto-3);
+  }
+  .giro {
+    display: inline-grid;
+    transition: transform var(--dur-color) ease;
+  }
+  .giro.abierta {
+    transform: rotate(180deg);
   }
   .fila {
     display: flex;

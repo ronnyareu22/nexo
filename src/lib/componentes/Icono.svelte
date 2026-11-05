@@ -62,7 +62,15 @@
     | 'bombilla'
     | 'camara'
     | 'chevron-arriba'
-    | 'externo';
+    | 'externo'
+    | 'router'
+    | 'telefono'
+    | 'tele'
+    | 'parlante'
+    | 'impresora'
+    | 'consola'
+    | 'enchufe'
+    | 'pregunta';
 </script>
 
 <script lang="ts">
@@ -291,5 +299,40 @@
     <path d="M13.5 4.5h6v6" />
     <path d="M19.5 4.5L11 13" />
     <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+  {:else if nombre === 'router'}
+    <!-- Tu red: la caja del router con sus dos antenas -->
+    <rect x="3" y="13" width="18" height="6.5" rx="2" />
+    <path d="M7 16.25h.01M10 16.25h.01" />
+    <path d="M6.5 13L5 6.5M17.5 13L19 6.5" />
+  {:else if nombre === 'telefono'}
+    <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+    <path d="M11 18.5h2" />
+  {:else if nombre === 'tele'}
+    <!-- Una tele de pantalla ancha sobre sus patas -->
+    <rect x="2.5" y="4.5" width="19" height="12" rx="2" />
+    <path d="M6.5 16.5l-1 3.5M17.5 16.5l1 3.5" />
+  {:else if nombre === 'parlante'}
+    <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+    <circle cx="12" cy="14.5" r="3.5" />
+    <path d="M12 7h.01" />
+  {:else if nombre === 'impresora'}
+    <path d="M7 9V3.5h10V9" />
+    <path d="M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" />
+    <path d="M7 14h10v6.5H7z" />
+    <path d="M17.5 11.75h.01" />
+  {:else if nombre === 'consola'}
+    <!-- Un control de consola -->
+    <path d="M7 7.5h10a4.5 4.5 0 0 1 4.4 5.4l-.8 4a2.6 2.6 0 0 1-4.5 1.2L14.5 16h-5l-1.6 2.1a2.6 2.6 0 0 1-4.5-1.2l-.8-4A4.5 4.5 0 0 1 7 7.5z" />
+    <path d="M8 10.5v3M6.5 12h3" />
+    <path d="M15.5 11h.01M17.5 13h.01" />
+  {:else if nombre === 'enchufe'}
+    <!-- Un enchufe con sus dos patas y el cable -->
+    <path d="M9 3v4M15 3v4" />
+    <path d="M6.5 7h11v3.5a5.5 5.5 0 0 1-11 0z" />
+    <path d="M12 16v5" />
+  {:else if nombre === 'pregunta'}
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M9.6 9.6a2.5 2.5 0 0 1 4.9.7c0 1.7-2.5 2-2.5 3.7" />
+    <path d="M12 17h.01" />
   {/if}
 </svg>

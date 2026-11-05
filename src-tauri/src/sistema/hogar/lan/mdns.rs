@@ -1,6 +1,7 @@
 //! Una sola pregunta mDNS (RFC 6762 y 6763) para ver qué más hay en la red: Home Assistant (con su dirección, para
-//! vincularlo), puentes Hue, teles (Google Cast, Android TV, AirPlay), HomeKit, Matter, Shelly y ESPHome. Fuera de
-//! Home Assistant, nada se maneja todavía: se muestra con el motivo en palabras.
+//! vincularlo), puentes Hue, Nanoleaf, Elgato, WLED y Shelly (los prueba `lan.rs` para manejarlos), teles (Google
+//! Cast, Android TV, AirPlay), HomeKit, Matter y ESPHome (solo se ven, con el motivo en palabras) y lo que sirve para
+//! nombrar los demás equipos en "Tu red" (impresoras, parlantes, computadoras).
 //!
 //! - Se manda una consulta PTR con todos los servicios a 224.0.0.251:5353 desde un puerto cualquiera: así cada
 //!   aparato contesta directo a este equipo ("consulta de una sola vez", RFC 6762 §5.1 y §6.7). No se escucha el
@@ -14,7 +15,7 @@ use std::time::{Duration, Instant};
 const MULTIDIFUSION: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const PUERTO: u16 = 5353;
 
-pub const SERVICIOS: [&str; 9] = [
+pub const SERVICIOS: &[&str] = &[
     "_home-assistant._tcp.local",
     "_hue._tcp.local",
     "_googlecast._tcp.local",
@@ -24,10 +25,24 @@ pub const SERVICIOS: [&str; 9] = [
     "_matter._tcp.local",
     "_shelly._tcp.local",
     "_esphomelib._tcp.local",
+    "_nanoleafapi._tcp.local",
+    "_elg._tcp.local",
+    "_wled._tcp.local",
+    "_http._tcp.local",
+    // Solo para nombrar equipos en "Tu red".
+    "_companion-link._tcp.local",
+    "_raop._tcp.local",
+    "_ipp._tcp.local",
+    "_printer._tcp.local",
+    "_spotify-connect._tcp.local",
+    "_sonos._tcp.local",
+    "_amzn-wplay._tcp.local",
+    "_smb._tcp.local",
+    "_workstation._tcp.local",
 ];
 
 const TIPO_A: u16 = 1;
-const TIPO_PTR: u16 = 12;
+pub const TIPO_PTR: u16 = 12;
 const TIPO_TXT: u16 = 16;
 const TIPO_SRV: u16 = 33;
 
@@ -44,6 +59,25 @@ pub fn consulta(servicios: &[&str]) -> Vec<u8> {
         p.push(0);
         p.extend_from_slice(&TIPO_PTR.to_be_bytes());
         p.extend_from_slice(&0x8001u16.to_be_bytes());
+    }
+    p
+}
+
+/// Una pregunta de cualquier tipo: por mDNS (con el bit QU, para que contesten directo) o al DNS del router
+/// (con "recursión deseada").
+pub fn pregunta(id: u16, nombres: &[&str], tipo: u16, multidifusion: bool) -> Vec<u8> {
+    let mut p = id.to_be_bytes().to_vec();
+    p.extend_from_slice(if multidifusion { &[0, 0] } else { &[1, 0] });
+    p.extend_from_slice(&(nombres.len() as u16).to_be_bytes());
+    p.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+    for n in nombres {
+        for etiqueta in n.split('.').filter(|e| !e.is_empty()) {
+            p.push(etiqueta.len().min(63) as u8);
+            p.extend_from_slice(&etiqueta.as_bytes()[..etiqueta.len().min(63)]);
+        }
+        p.push(0);
+        p.extend_from_slice(&tipo.to_be_bytes());
+        p.extend_from_slice(&(if multidifusion { 0x8001u16 } else { 1 }).to_be_bytes());
     }
     p
 }
@@ -157,12 +191,41 @@ pub struct Instancia {
 }
 
 impl Instancia {
-    fn txt(&self, k: &str) -> Option<&str> {
+    pub fn txt(&self, k: &str) -> Option<&str> {
         self.txt.iter().find(|(c, _)| c == k).map(|(_, v)| v.as_str()).filter(|v| !v.is_empty())
     }
-    fn etiqueta(&self) -> &str {
+    pub fn etiqueta(&self) -> &str {
         self.nombre.first().map(String::as_str).unwrap_or("")
     }
+    /// "_hue._tcp.local" → "hue".
+    pub fn corto(&self) -> &str {
+        self.servicio.split('.').next().unwrap_or("").trim_start_matches('_')
+    }
+}
+
+/// Los nombres que da una instancia para "Tu red": su nombre amistoso, el de la instancia, el modelo y el equipo.
+pub fn pistas(i: &Instancia) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+    for k in ["fn", "n", "friendly_name", "location_name"] {
+        if let Some(t) = i.txt(k) {
+            v.push(limpio(t));
+        }
+    }
+    // RAOP: "A1B2C3D4E5F6@Sala" → "Sala".
+    let etiqueta = i.etiqueta();
+    let etiqueta = etiqueta.split_once('@').map(|(_, n)| n).unwrap_or(etiqueta);
+    v.push(limpio(etiqueta));
+    for k in ["md", "model", "ty", "product", "am"] {
+        if let Some(t) = i.txt(k) {
+            v.push(format!("modelo:{}", limpio(t)));
+        }
+    }
+    if let Some(e) = i.equipo.as_ref().and_then(|e| e.first()) {
+        v.push(format!("equipo:{}", limpio(e)));
+    }
+    v.retain(|x| !x.is_empty() && !x.ends_with(':'));
+    v.dedup();
+    v
 }
 
 /// Junta registros de varias respuestas en instancias. `origen` es quien mandó cada paquete (si no hay registro A).
@@ -231,6 +294,7 @@ pub fn hallazgo(i: &Instancia) -> Option<Hallazgo> {
         nombre,
         modelo: None,
         direccion: Some(ip.to_string()),
+        mac: None,
         senal: None,
         version: None,
         capacidades: Capacidades::ninguna(),
@@ -243,11 +307,6 @@ pub fn hallazgo(i: &Instancia) -> Option<Hallazgo> {
     };
     let h = match corto.as_str() {
         "home-assistant" => return Some(home_assistant(i, ip)),
-        "hue" => {
-            let mut h = base(Clase::Otro, "Philips Hue", etiqueta.clone(), pronto("Es el puente de Philips Hue. Pronto podrás vincularlo con Nexo."));
-            h.proveedor = Proveedor::Hue;
-            con_modelo(h, i.txt("modelid"))
-        }
         "googlecast" => {
             let md = i.txt("md").unwrap_or("");
             let m = md.to_lowercase();
@@ -294,21 +353,10 @@ pub fn hallazgo(i: &Instancia) -> Option<Hallazgo> {
                 24 | 31 | 35 | 36 => Clase::Tv,
                 _ => Clase::Otro,
             };
-            let h = base(clase, "HomeKit", etiqueta.clone(), pronto("Es un accesorio de HomeKit. Pronto podrás manejarlo desde Nexo."));
+            let h = base(clase, "HomeKit", etiqueta.clone(), pronto("Es un accesorio de HomeKit. Vincularlo desde Nexo llega más adelante."));
             con_modelo(h, i.txt("md"))
         }
-        "matter" => base(Clase::Otro, "Matter", "Aparato Matter".into(), pronto("Es un aparato Matter. Pronto podrás manejarlo desde Nexo.")),
-        "shelly" => {
-            let n = etiqueta.to_lowercase();
-            let clase = if n.contains("plug") {
-                Clase::Enchufe
-            } else if ["bulb", "rgbw", "dimmer", "duo", "vintage"].iter().any(|x| n.contains(x)) {
-                Clase::Luz
-            } else {
-                Clase::Otro
-            };
-            con_modelo(base(clase, "Shelly", etiqueta.clone(), pronto(PRONTO)), i.txt("app"))
-        }
+        "matter" => base(Clase::Otro, "Matter", "Aparato Matter".into(), pronto("Es un aparato Matter. Vincularlo desde Nexo llega más adelante.")),
         "esphomelib" => {
             let nombre = i.txt("friendly_name").map(limpio).unwrap_or(etiqueta.clone());
             base(Clase::Otro, "ESPHome", nombre, pronto(PRONTO))
@@ -347,6 +395,7 @@ fn home_assistant(i: &Instancia, ip: Ipv4Addr) -> Hallazgo {
         nombre: i.txt("location_name").map(limpio).filter(|n| !n.is_empty()).unwrap_or_else(|| "Home Assistant".into()),
         modelo: None,
         direccion: Some(ip.to_string()),
+        mac: None,
         senal: None,
         version: i.txt("version").map(limpio).filter(|v| !v.is_empty()),
         capacidades: Capacidades::ninguna(),
@@ -364,12 +413,18 @@ fn primera_mayuscula(t: &str) -> String {
     c.next().map(|p| p.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
-pub fn buscar(fin: Instant) -> Vec<Hallazgo> {
+/// Lo que se muestra de todas las instancias (las de Hue, Shelly, Nanoleaf, Elgato y WLED las arma `lan.rs`).
+pub fn hallazgos(instancias: &[Instancia], propia: Option<IpAddr>) -> Vec<Hallazgo> {
+    instancias.iter().filter(|i| i.ip.map(IpAddr::V4) != propia).filter_map(hallazgo).collect()
+}
+
+/// Pregunta por todos los servicios y junta las instancias que contesten hasta `fin`.
+pub fn buscar(fin: Instant) -> Vec<Instancia> {
     let Ok(s) = super::abrir_udp(0) else { return Vec::new() };
     let _ = s.set_multicast_ttl_v4(255);
     let destino = SocketAddr::from((MULTIDIFUSION, PUERTO));
     let propia = super::ip_propia();
-    let paquete = consulta(&SERVICIOS);
+    let paquete = consulta(SERVICIOS);
     let mut paquetes: Vec<(Vec<Registro>, Option<Ipv4Addr>)> = Vec::new();
     let mut envios = [Instant::now(), Instant::now() + Duration::from_millis(1200)].into_iter().peekable();
     while Instant::now() < fin {
@@ -388,11 +443,7 @@ pub fn buscar(fin: Instant) -> Vec<Hallazgo> {
             }
         });
     }
-    juntar(&paquetes)
-        .iter()
-        .filter(|i| i.ip.map(IpAddr::V4) != propia)
-        .filter_map(hallazgo)
-        .collect()
+    juntar(&paquetes).into_iter().filter(|i| i.ip.map(IpAddr::V4) != propia).collect()
 }
 
 #[cfg(test)]
@@ -427,7 +478,11 @@ mod pruebas {
         esperado.extend(n("_hue._tcp.local"));
         esperado.extend_from_slice(&[0, 12, 0x80, 0x01]);
         assert_eq!(c, esperado);
-        assert_eq!(u16_be(&consulta(&SERVICIOS), 4), Some(9));
+        assert_eq!(u16_be(&consulta(SERVICIOS), 4), Some(SERVICIOS.len() as u16));
+        // Al DNS del router: con recursión y clase IN, sin el bit QU.
+        let d = pregunta(7, &["7.1.168.192.in-addr.arpa"], TIPO_PTR, false);
+        assert_eq!(&d[..6], &[0, 7, 1, 0, 0, 1]);
+        assert_eq!(&d[d.len() - 4..], &[0, 12, 0, 1]);
     }
 
     #[test]
@@ -528,9 +583,10 @@ mod pruebas {
             puerto: None,
             ip: Some(Ipv4Addr::new(192, 168, 1, 20)),
         };
-        let hue = hallazgo(&inst("_hue._tcp.local", "Hue Bridge - 1A2B3C", &[("modelid", "BSB002")])).unwrap_or_else(|| panic!());
-        assert_eq!(hue.proveedor, Proveedor::Hue);
-        assert_eq!(hue.modelo.as_deref(), Some("BSB002"));
+        // Hue y Shelly los arma `lan.rs` (con su vínculo o su prueba por HTTP).
+        assert_eq!(hallazgo(&inst("_hue._tcp.local", "Hue Bridge - 1A2B3C", &[("modelid", "BSB002")])), None);
+        let raop = inst("_raop._tcp.local", "A1B2C3D4E5F6@Sala", &[("am", "AudioAccessory5,1")]);
+        assert_eq!(pistas(&raop), vec!["Sala".to_string(), "modelo:AudioAccessory5,1".to_string()]);
         let lampara = hallazgo(&inst("_hap._tcp.local", "Lámpara 7A3F", &[("ci", "5"), ("md", "LT01")])).unwrap_or_else(|| panic!());
         assert_eq!(lampara.clase, Clase::Luz);
         let cerradura = hallazgo(&inst("_hap._tcp.local", "Puerta", &[("ci", "6")])).unwrap_or_else(|| panic!());
@@ -543,8 +599,7 @@ mod pruebas {
         assert_eq!((samsung.clase, samsung.marca.as_str()), (Clase::Tv, "Samsung"));
         let homepod = hallazgo(&inst("_airplay._tcp.local", "HomePod", &[("model", "AudioAccessory5,1")])).unwrap_or_else(|| panic!());
         assert_eq!(homepod.clase, Clase::Otro);
-        let shelly = hallazgo(&inst("_shelly._tcp.local", "shellyplusplugs-a8032ab1", &[])).unwrap_or_else(|| panic!());
-        assert_eq!(shelly.clase, Clase::Enchufe);
+        assert_eq!(hallazgo(&inst("_shelly._tcp.local", "shellyplusplugs-a8032ab1", &[])), None);
         let matter = hallazgo(&inst("_matter._tcp.local", "A1B2C3D4E5F60718-0000000000000001", &[])).unwrap_or_else(|| panic!());
         assert_eq!(matter.nombre, "Aparato Matter");
         let esp = hallazgo(&inst("_esphomelib._tcp.local", "sensor-sala", &[("friendly_name", "Sensor de la sala")])).unwrap_or_else(|| panic!());
@@ -561,6 +616,6 @@ mod pruebas {
         assert_eq!(leer(&p), None);
         assert_eq!(leer(&[1, 2, 3]), None);
         // Una consulta (sin el bit de respuesta) no se lee.
-        assert_eq!(leer(&consulta(&SERVICIOS)), None);
+        assert_eq!(leer(&consulta(SERVICIOS)), None);
     }
 }

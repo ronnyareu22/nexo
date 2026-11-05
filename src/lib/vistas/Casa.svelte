@@ -1,11 +1,13 @@
 <!--
   Casa: todo lo de la casa en un solo lugar, por habitación (Sala, Cuarto, Escritorio… y "Sin cuarto" al final).
-  - Arriba: el resumen ("14 aparatos · 6 encendidos"), encender o apagar todas las luces, "Nuevo grupo" y
-    "Buscar aparatos" (≈6 s en la red y por Bluetooth; ver BuscarAparatos.svelte).
+  - Arriba: el resumen ("14 aparatos · 6 encendidos"), encender o apagar todas las luces, "Nuevo grupo", "Tu red"
+    (todo lo que hay en tu Wi-Fi, ≈4 s; ver TuRed.svelte) y "Buscar aparatos" (≈6 s en la red y por Bluetooth; ver
+    BuscarAparatos.svelte). Un solo panel abierto a la vez.
   - Los grupos ("Escritorio") con su interruptor; cada habitación con el de sus luces y sus tarjetas.
   - Las habitaciones se acomodan en una rejilla pareja: las que tienen pocos aparatos se ponen una al lado de la
     otra, así no quedan huecos grandes.
-  - Sin cuentas ni aparatos: un estado vacío calmo que lleva a buscar o a conectar una cuenta en Ajustes.
+  - Sin aparatos: un estado vacío calmo que empieza por lo de tu red y Bluetooth, sin cuentas ni nube ("Buscar
+    aparatos" y "Ver tu red"); Home Assistant, opcional, en Ajustes.
   Se lee al entrar y cada 15 s solo con la ventana a la vista y enfocada (y al volver a ella o cuando algo cambia
   desde el menú del ícono o una escena). Nada más corre.
 -->
@@ -32,17 +34,21 @@
   import TarjetaAparato from '$lib/componentes/TarjetaAparato.svelte';
   import IlustracionAparato from '$lib/componentes/IlustracionAparato.svelte';
   import BuscarAparatos from '$lib/componentes/BuscarAparatos.svelte';
+  import TuRed from '$lib/componentes/TuRed.svelte';
   import EditarAparato from '$lib/componentes/EditarAparato.svelte';
   import EditarGrupo from '$lib/componentes/EditarGrupo.svelte';
   import EditarHabitacion from '$lib/componentes/EditarHabitacion.svelte';
 
   let {
     buscarAlEntrar = false,
+    abrirRedAlEntrar = false,
     onir,
     onerror,
   }: {
     /** Empieza a buscar aparatos apenas se abre (desde Ajustes o Mi setup). */
     buscarAlEntrar?: boolean;
+    /** Abre "Tu red" apenas se abre (desde Ajustes o Mi setup). */
+    abrirRedAlEntrar?: boolean;
     onir: (seccion: string, id?: string) => void;
     onerror: (texto: string) => void;
   } = $props();
@@ -90,14 +96,20 @@
   const ordenDe = (id: string) => (accion: Accion, confirmado?: boolean) =>
     mandar({ tipo: 'aparato', id }, accion, confirmado);
 
-  // ---------------------------------------------------------------- Búsqueda
+  // ---------------------------------------------------------------- Buscar y Tu red (uno a la vez)
 
-  let buscando = $state(false);
+  let panel = $state<'buscar' | 'red' | null>(null);
   let vuelta = $state(0);
 
   /** Abre la búsqueda o, si ya está abierta, busca de nuevo. */
   function buscar() {
-    buscando = true;
+    panel = 'buscar';
+    vuelta++;
+  }
+
+  /** Abre Tu red o, si ya está abierta, la analiza de nuevo. */
+  function verRed() {
+    panel = 'red';
     vuelta++;
   }
 
@@ -246,7 +258,8 @@
 
   onMount(() => {
     leer(true);
-    if (buscarAlEntrar || pruebaCasa === 'buscar') buscar();
+    if (abrirRedAlEntrar || pruebaCasa === 'red') verRed();
+    else if (buscarAlEntrar || pruebaCasa === 'buscar') buscar();
     // Cada 15 s, solo con la ventana a la vista y enfocada; al volver a ella, enseguida.
     const intervalo = setInterval(() => {
       if (document.visibilityState === 'visible' && document.hasFocus()) leer(true);
@@ -287,6 +300,10 @@
           Nuevo grupo
         </button>
       {/if}
+      <button type="button" class="boton" onclick={verRed}>
+        <Icono nombre="red" tamano={16} />
+        Tu red
+      </button>
       {#if hayCuentas(estado)}
         <button type="button" class="boton-primario" onclick={buscar}>
           <Icono nombre="buscar" tamano={16} />
@@ -304,15 +321,19 @@
     </div>
   {/each}
 
-  {#if buscando}
+  {#if panel === 'buscar'}
     {#key vuelta}
       <BuscarAparatos
         onestado={(e) => (estado = e)}
         {onir}
         {onerror}
         onbuscar={buscar}
-        oncerrar={() => (buscando = false)}
+        oncerrar={() => (panel = null)}
       />
+    {/key}
+  {:else if panel === 'red'}
+    {#key vuelta}
+      <TuRed onestado={(e) => (estado = e)} {onir} {onerror} onanalizar={verRed} oncerrar={() => (panel = null)} />
     {/key}
   {/if}
 
@@ -329,19 +350,22 @@
       </div>
       <div class="vacio__textos">
         <h2 id="casa-vacia">Tu casa, desde Nexo</h2>
-        <p>Enciende las luces, mira si la puerta quedó cerrada y junta todo en escenas de un toque.</p>
+        <p>
+          Nexo encuentra las luces y los enchufes que están en tu mismo Wi-Fi o cerca por Bluetooth, y los maneja
+          directo: sin cuentas ni nube.
+        </p>
         <ul class="formas">
           <li>
-            <span class="ficha-icono chica" style:--tono="var(--amarillo)"><Icono nombre="bombilla" tamano={16} /></span>
-            <span><b>Tuya / Smart Life:</b> tus luces y enchufes de la app, con tu cuenta.</span>
+            <span class="ficha-icono chica" style:--tono="var(--celeste)"><Icono nombre="router" tamano={16} /></span>
+            <span><b>En tu red Wi-Fi:</b> Philips Hue, LIFX, Nanoleaf, Elgato, WLED, Shelly, WiZ, Yeelight, Govee, Tasmota…</span>
+          </li>
+          <li>
+            <span class="ficha-icono chica" style:--tono="var(--amarillo)"><Icono nombre="bluetooth" tamano={16} /></span>
+            <span><b>Por Bluetooth:</b> tiras LED.</span>
           </li>
           <li>
             <span class="ficha-icono chica"><Icono nombre="casa" tamano={16} /></span>
-            <span><b>Home Assistant:</b> lo que ya tienes en él, gratis y en tu red.</span>
-          </li>
-          <li>
-            <span class="ficha-icono chica" style:--tono="var(--celeste)"><Icono nombre="red" tamano={16} /></span>
-            <span><b>WiZ, Yeelight, Govee y tiras Bluetooth:</b> Nexo las encuentra y las maneja sin pasar por internet.</span>
+            <span><b>Home Assistant (opcional):</b> lo que ya tienes en él.</span>
           </li>
         </ul>
         <div class="vacio__botones">
@@ -349,8 +373,15 @@
             <Icono nombre="buscar" tamano={16} />
             Buscar aparatos
           </button>
-          <button type="button" class="boton" onclick={() => onir('ajustes', 'casa')}>Conectar una cuenta</button>
+          <button type="button" class="boton" onclick={verRed}>
+            <Icono nombre="red" tamano={16} />
+            Ver tu red
+          </button>
         </div>
+        <p class="vacio__pie">
+          ¿Usas Home Assistant?
+          <button type="button" class="enlace" onclick={() => onir('ajustes', 'casa')}>Conéctalo en Ajustes</button>
+        </p>
       </div>
     </section>
   {:else}
@@ -846,5 +877,22 @@
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 4px;
+  }
+  .vacio .vacio__pie {
+    font: var(--letra-pequena);
+    color: var(--texto-3);
+  }
+  .enlace {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--primario-texto);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .enlace:hover {
+    text-decoration-thickness: 2px;
   }
 </style>

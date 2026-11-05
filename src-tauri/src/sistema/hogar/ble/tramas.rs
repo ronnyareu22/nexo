@@ -201,6 +201,7 @@ fn hallazgo(
         nombre: nombre.map(str::to_string).unwrap_or_else(|| "Luz Bluetooth".into()),
         modelo: nombre.map(str::to_string),
         direccion: Some(a.direccion.clone()),
+        mac: None,
         senal: a.senal,
         version: None,
         capacidades,

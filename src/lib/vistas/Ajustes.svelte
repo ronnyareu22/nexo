@@ -1,5 +1,5 @@
 <!-- Ajustes: apariencia, tu nombre, arranque, widget de escritorio, permisos, tus equipos (el trabajo remoto:
-     Automático, Siempre o Nunca, y qué equipo encontró Nexo), la casa (Tuya / Smart Life y Home Assistant),
+     Automático, Siempre o Nunca, y qué equipo encontró Nexo), la casa (buscar, tu red y las cuentas opcionales),
      historial y "Acerca de", en filas como los Ajustes del Sistema. Mientras falte un permiso, se revisa cada 3 s
      para mostrar cuando ya está. Con `foco="casa"` (desde Casa o Mi setup) se baja a la sección de la casa. -->
 <script lang="ts">

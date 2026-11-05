@@ -2,12 +2,21 @@
 //!
 //! - Modelo común (`modelo`): clases, capacidades, estado, acciones y órdenes. Lo hablan la interfaz, las escenas,
 //!   el menú del ícono y, más adelante, la voz (`hogar_ejecutar` con una `Orden`).
-//! - Proveedores: la nube de Tuya (`tuya`), Home Assistant (`ha`), la red local (`lan`: WiZ, Yeelight y Govee se
-//!   manejan; Tuya, Hue, LIFX, teles y otros se detectan) y Bluetooth (`ble`: tiras ELK-BLEDOM y Triones).
-//! - Las claves (Access Secret de Tuya, token de Home Assistant) van al llavero (`llavero`); lo demás, sin secretos,
-//!   en `ajustes.json › hogar`. La lista de Tuya con lo que acepta cada aparato se guarda en `casa.json`.
-//! - Nada corre en segundo plano: se lee al abrir Casa o Mi setup (como mucho cada 15 s), tras cada orden y al
-//!   buscar (≈6 s, a pedido). Avisa "casa-cambio" cuando algo cambió desde el menú del ícono o una escena.
+//! - Primero lo de la misma red, sin cuentas ni nube (`lan`): Philips Hue (por el puente, con su botón), LIFX,
+//!   Nanoleaf (con su botón), Elgato, WLED, Shelly, Tasmota y OpenBeken (con su contraseña, si tienen), WiZ,
+//!   Yeelight y Govee; y Bluetooth (`ble`: tiras ELK-BLEDOM y Triones). Teles, HomeKit, Matter y lo de Tuya sin
+//!   firmware abierto solo se ven, con el porqué.
+//! - "Tu red" (`red`): todo lo que hay en la misma red (también teléfonos, computadoras e impresoras), qué es y qué
+//!   puede hacer Nexo con cada cosa.
+//! - Extras opcionales: Home Assistant (`ha`) y la nube de Tuya (`tuya`, escondida en "Otras cuentas").
+//! - Cada aparato se reconoce por su MAC o su número de serie, nunca por la IP: si el router le da otra, se
+//!   vuelve a encontrar al buscar o cuando deja de contestar, y se anota sola.
+//! - Las claves (Access Secret de Tuya, token de Home Assistant, la clave del puente Hue, el token de Nanoleaf y la
+//!   contraseña de un Shelly o un Tasmota) van al llavero (`llavero`); lo demás, sin secretos, en
+//!   `ajustes.json › hogar`. La lista de Tuya con lo que acepta cada aparato se guarda en `casa.json`.
+//! - Nada corre en segundo plano: se lee al abrir Casa o Mi setup (como mucho cada 15 s), tras cada orden, al
+//!   buscar (≈6 s) y al analizar la red (≈4 s), siempre a pedido. Avisa "casa-cambio" cuando algo cambió desde el
+//!   menú del ícono o una escena.
 
 pub mod ble;
 pub mod ejemplo;
@@ -18,6 +27,7 @@ pub mod lan;
 pub mod llavero;
 pub mod modelo;
 mod nucleo;
+pub mod red;
 pub mod tuya;
 
 pub use nucleo::{aplicar_objetivo, elegir_en_bandeja, menu_bandeja};
@@ -44,10 +54,11 @@ pub struct CuentaHa {
     pub url: String,
 }
 
-/// Un aparato agregado desde una búsqueda (WiZ, Yeelight, Govee o Bluetooth).
+/// Un aparato agregado desde una búsqueda (de la red local o por Bluetooth).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Local {
+    /// Estable: por su MAC o su número de serie ("wled:60019423b441", "shelly:a8032ab1c2d3/switch:1").
     pub id: String,
     pub proveedor: Proveedor,
     pub nombre: String,
@@ -58,9 +69,45 @@ pub struct Local {
     pub marca: String,
     #[serde(default)]
     pub modelo: Option<String>,
-    /// La IP o el Bluetooth.
+    /// La IP o el Bluetooth (la de un puente Hue va en su `Puente`).
     pub direccion: String,
     pub capacidades: Capacidades,
+    /// La MAC, para volver a encontrarlo si cambia de IP.
+    #[serde(default)]
+    pub mac: Option<String>,
+    /// La salida o la luz del aparato: "3" en un puente Hue, "switch:1" en un Shelly, "2" en un Tasmota.
+    #[serde(default)]
+    pub canal: Option<String>,
+    /// El puente al que pertenece (Hue): su id en `puentes`.
+    #[serde(default)]
+    pub puente: Option<String>,
+    /// El puerto, si no es el de siempre (Nanoleaf).
+    #[serde(default)]
+    pub puerto: Option<u16>,
+    /// Tiene una clave en el llavero (token o contraseña), con el id de su aparato o de su puente.
+    #[serde(default)]
+    pub con_clave: bool,
+    /// Su rango de blancos en Kelvin, si se sabe.
+    #[serde(default)]
+    pub kelvin: Option<(u32, u32)>,
+}
+
+/// Un puente de la red (Philips Hue): sus luces lo usan para llegar. La clave va al llavero con su id.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Puente {
+    /// "hue:001788fffe23bfc2"
+    pub id: String,
+    pub proveedor: Proveedor,
+    pub nombre: String,
+    pub direccion: String,
+    #[serde(default)]
+    pub mac: Option<String>,
+    #[serde(default)]
+    pub modelo: Option<String>,
+    /// La huella SHA-256 de su certificado, en hexadecimal (se fija al vincularlo).
+    #[serde(default)]
+    pub huella: Option<String>,
 }
 
 /// Lo que la persona cambió de un aparato.
@@ -101,6 +148,7 @@ pub struct AjustesHogar {
     pub tuya: Option<CuentaTuya>,
     pub home_assistant: Option<CuentaHa>,
     pub locales: Vec<Local>,
+    pub puentes: Vec<Puente>,
     pub aparatos: BTreeMap<String, Preferencias>,
     /// `None`: las de fábrica (Sala, Cuarto, Oficina, Cocina, Escritorio).
     pub habitaciones: Option<Vec<Habitacion>>,
@@ -216,6 +264,29 @@ pub struct ResultadoBusqueda {
     pub estado: EstadoCasa,
 }
 
+/// `hogar_vincular`: si ya quedó y cómo quedó la casa.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultadoVinculo {
+    /// Ya quedó en Nexo; si no, todavía no se presionó el botón (se vuelve a intentar).
+    pub listo: bool,
+    pub mensaje: String,
+    pub estado: EstadoCasa,
+}
+
+/// `hogar_red`: lo que hay en la red.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ResultadoRed {
+    pub equipos: Vec<red::EquipoRed>,
+    pub ip: Option<String>,
+    pub router: Option<String>,
+    pub prefijo: Option<u8>,
+    pub avisos: Vec<String>,
+    pub segundos: f32,
+    pub estado: EstadoCasa,
+}
+
 /// Lo que se cambia de un aparato desde la interfaz.
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -267,10 +338,22 @@ pub async fn hogar_buscar(app: AppHandle) -> Result<ResultadoBusqueda, String> {
     en_hilo(move || nucleo::buscar(&app)).await
 }
 
-/// Suma a Nexo algo encontrado en la última búsqueda (WiZ, Yeelight, Govee o Bluetooth).
+/// Suma a Nexo algo encontrado en la última búsqueda (lo que no pide vincularse).
 #[tauri::command]
 pub async fn hogar_agregar(app: AppHandle, id: String) -> Result<EstadoCasa, String> {
     en_hilo(move || nucleo::agregar(&app, &id)).await
+}
+
+/// Un intento de vincular algo encontrado: con su botón (Hue, Nanoleaf) o con su contraseña (Shelly, Tasmota).
+#[tauri::command]
+pub async fn hogar_vincular(app: AppHandle, id: String, clave: Option<String>) -> Result<ResultadoVinculo, String> {
+    en_hilo(move || nucleo::vincular(&app, &id, clave.as_deref())).await
+}
+
+/// Tu red: todo lo que hay en la misma red (≈4 s, a pedido; queda en memoria).
+#[tauri::command]
+pub async fn hogar_red(app: AppHandle) -> Result<ResultadoRed, String> {
+    en_hilo(move || nucleo::red(&app)).await
 }
 
 /// Quita de Nexo un aparato agregado desde una búsqueda (en la cuenta de Tuya o Home Assistant no se puede).

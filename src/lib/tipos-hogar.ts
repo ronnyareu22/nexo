@@ -10,6 +10,12 @@ export type Proveedor =
   | 'govee'
   | 'hue'
   | 'lifx'
+  | 'shelly'
+  | 'nanoleaf'
+  | 'elgato'
+  | 'wled'
+  /** Tasmota y OpenBeken (aparatos Tuya con firmware abierto): la misma API. */
+  | 'tasmota'
   | 'bleElk'
   | 'bleTriones'
   | 'homeAssistant'
@@ -170,7 +176,11 @@ export type Manejo =
   | { tipo: 'cuentaTuya' }
   | { tipo: 'activar'; paso: string }
   | { tipo: 'pronto'; motivo: string }
-  | { tipo: 'homeAssistant'; url: string };
+  | { tipo: 'homeAssistant'; url: string }
+  /** Hay que vincularlo una vez: con el botón del aparato (Hue, Nanoleaf) o con su contraseña (Shelly, Tasmota). */
+  | { tipo: 'vincular'; forma: FormaVinculo; paso: string };
+
+export type FormaVinculo = 'boton' | 'clave';
 
 export interface Hallazgo {
   id: string;
@@ -182,6 +192,8 @@ export interface Hallazgo {
   nombre: string;
   modelo: string | null;
   direccion: string | null;
+  /** La MAC ("a4:2b:b0:12:34:56"), si se sabe: con ella Nexo lo vuelve a encontrar si cambia de IP. */
+  mac: string | null;
   /** dBm */
   senal: number | null;
   version: string | null;
@@ -203,4 +215,66 @@ export interface CambioAparato {
   alias?: string | null;
   habitacion?: string | null;
   forma?: FormaLuz | null;
+}
+
+// --- Vincular (Hue, Nanoleaf: botón; Shelly, Tasmota: contraseña) ---
+
+export interface ResultadoVinculo {
+  /** Ya quedó en Nexo. Si no, todavía no se presionó el botón: se vuelve a intentar en un par de segundos. */
+  listo: boolean;
+  /** "Listo: agregué 5 luces del puente Hue." o "Todavía no veo el botón presionado." */
+  mensaje: string;
+  estado: EstadoCasa;
+}
+
+// --- Tu red ---
+
+export type TipoEquipo =
+  | 'router'
+  | 'esteEquipo'
+  | 'telefono'
+  | 'computadora'
+  | 'tele'
+  | 'parlante'
+  | 'luz'
+  | 'enchufe'
+  | 'camara'
+  | 'impresora'
+  | 'consola'
+  | 'desconocido';
+
+/** nexo: lo maneja Nexo · agregar: se puede agregar · otros: solo se ve. */
+export type GrupoRed = 'nexo' | 'agregar' | 'otros';
+
+export interface EquipoRed {
+  ip: string;
+  /** "a4:2b:b0:12:34:56" */
+  mac: string | null;
+  /** Dirección privada (la cambia el equipo solo): casi siempre un teléfono o una computadora. */
+  privada: boolean;
+  nombre: string;
+  /** Cómo se anuncia en la red ("iPhone-de-Ana.local"), si no es el nombre que se muestra. */
+  nombreRed: string | null;
+  /** La marca por la MAC o por lo que contestó. */
+  marca: string | null;
+  tipo: TipoEquipo;
+  grupo: GrupoRed;
+  /** Por qué solo se ve (otros) o qué falta para agregarlo (agregar). */
+  motivo: string | null;
+  /** Para agregarlo o vincularlo (agregar), con su `manejo`. */
+  hallazgo: Hallazgo | null;
+  /** Los aparatos de Nexo en esta IP (nexo). */
+  aparatos: string[];
+}
+
+export interface ResultadoRed {
+  equipos: EquipoRed[];
+  /** La IP de este equipo, la del router y el prefijo de la red (24 = hasta 254 equipos). */
+  ip: string | null;
+  router: string | null;
+  prefijo: number | null;
+  /** Lo que no se pudo revisar, en palabras. */
+  avisos: string[];
+  segundos: number;
+  estado: EstadoCasa;
 }

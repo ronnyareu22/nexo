@@ -189,6 +189,7 @@ fn hallazgo(f: &Foco) -> Option<Hallazgo> {
         nombre: nombre.into(),
         modelo: f.modulo.clone(),
         direccion: Some(ip.to_string()),
+        mac: super::super::modelo::mac_normal(&f.mac),
         senal: f.senal,
         version: f.version.clone(),
         capacidades: capacidades(tipo),

@@ -90,6 +90,11 @@ const PROVEEDORES: Record<Proveedor, string> = {
   govee: 'Govee',
   hue: 'Philips Hue',
   lifx: 'LIFX',
+  shelly: 'Shelly',
+  nanoleaf: 'Nanoleaf',
+  elgato: 'Elgato',
+  wled: 'WLED',
+  tasmota: 'Tasmota',
   bleElk: 'Bluetooth',
   bleTriones: 'Bluetooth',
   homeAssistant: 'Home Assistant',
@@ -109,9 +114,9 @@ export function viaDe(a: Aparato): string {
 const femenina = (c: ClaseAparato) => c === 'luz' || c === 'tv' || c === 'cerradura' || c === 'cortina' || c === 'clima';
 const g = (c: ClaseAparato, masc: string, fem: string) => (femenina(c) ? fem : masc);
 
-/** Cómo está, en una línea ("Encendida · 70 %", "Cerrada", "Abierta al 70 %", "Sin conexión"). */
+/** Cómo está, en una línea ("Encendida · 70 %", "Cerrada", "Abierta al 70 %", "Sin respuesta"). */
 export function estadoEnPalabras(a: Aparato): string {
-  if (!a.enLinea) return 'Sin conexión';
+  if (!a.enLinea) return 'Sin respuesta';
   const e = a.estado;
   switch (a.clase) {
     case 'cerradura':

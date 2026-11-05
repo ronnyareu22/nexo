@@ -1,4 +1,5 @@
-//! Las claves de la casa (el Access Secret de Tuya, el token de Home Assistant) en el llavero del sistema:
+//! Las claves de la casa (el Access Secret de Tuya, el token de Home Assistant y las de los aparatos de la red: la
+//! clave del puente Hue, el token de una Nanoleaf, la contraseña de un Shelly o un Tasmota) en el llavero del sistema:
 //! el Llavero de la Mac y el Administrador de credenciales de Windows. Nunca en `ajustes.json`, en un registro
 //! ni en la interfaz: se escriben al conectar, se leen al usarlas y se borran al desconectar.
 //! - Mac: con la firma local (ad hoc), después de cada versión nueva macOS puede preguntar una vez si Nexo puede
@@ -9,6 +10,8 @@
 pub enum Clave {
     Tuya,
     HomeAssistant,
+    /// Un aparato de la red; la cuenta es su id en Nexo ("hue:001788fffe23bfc2", "shelly:a8032ab1c2d3").
+    Aparato,
 }
 
 impl Clave {
@@ -16,6 +19,7 @@ impl Clave {
         match self {
             Clave::Tuya => "Nexo · Tuya / Smart Life",
             Clave::HomeAssistant => "Nexo · Home Assistant",
+            Clave::Aparato => "Nexo · Aparatos de la casa",
         }
     }
 }

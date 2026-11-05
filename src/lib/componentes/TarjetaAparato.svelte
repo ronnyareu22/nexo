@@ -5,6 +5,7 @@
   - Tele: volumen, silencio y entrada. Cortina: abrir, cerrar y cuánto. Cerradura: cerrar, o abrir con confirmación.
   - Sensor de puerta: abierta o cerrada y su batería. Lo detectado sin control: "pronto podrás manejarlo".
   `compacta` (Mi setup): dibujo chico al lado del nombre, interruptor y brillo.
+  Si no contesta: "Sin respuesta" en tenue, sin aviso ni color de alerta, y sin controles hasta que vuelva.
   Los deslizadores se ven al instante y mandan el último valor cuando se dejan quietos (≈0,3 s): nunca una fila de
   órdenes. Sin animaciones; el escenario solo cambia de color.
 -->
@@ -164,7 +165,7 @@
         {tipoDe(a)}{#if estadoEnPalabras(a)}<span class="punto-sep" aria-hidden="true">{' · '}</span><span class="estado" class:ok={estaActivo}>{estadoEnPalabras(a)}</span>{/if}
       </p>
     </div>
-    {#if a.controlable && c.encender}
+    {#if a.controlable && c.encender && !sinConexion}
       <Interruptor encendido={encendido} etiqueta={encendido ? `Apagar ${a.nombre}` : `Encender ${a.nombre}`} grande={!compacta} cargando={false} oncambio={alternar} />
     {/if}
   </div>
@@ -269,9 +270,6 @@
 
   {#if !compacta}
     <p class="pie">
-      {#if sinConexion}
-        <span class="aviso"><Icono nombre="alerta" tamano={13} />Sin conexión</span>
-      {/if}
       <span>{viaDe(a)}{a.direccion && a.via === 'wifi' ? ` · ${a.direccion}` : ''}</span>
       {#if a.controlable && !c.informaEstado}<span>· Recuerda lo último que le mandaste</span>{/if}
     </p>
@@ -324,8 +322,8 @@
     opacity: 0.75;
   }
   .sin-conexion .dibujo {
-    opacity: 0.45;
-    filter: grayscale(0.6);
+    opacity: 0.55;
+    filter: grayscale(0.5);
   }
   .editar {
     position: absolute;
@@ -382,7 +380,7 @@
     font-weight: 550;
   }
   .sin-conexion .estado {
-    color: var(--aviso);
+    color: var(--texto-3);
   }
 
   .nota {
@@ -516,13 +514,6 @@
     font-size: 11.5px;
     line-height: 16px;
     color: var(--texto-3);
-  }
-  .pie .aviso {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--aviso);
-    font-weight: 600;
   }
 
   /* Compacta (Mi setup): el dibujo chico a la izquierda, sin escenario alto. */

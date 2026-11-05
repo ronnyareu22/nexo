@@ -5,9 +5,9 @@
   <!-- macOS muestra este texto al pedir permiso de Bluetooth. -->
   <key>NSBluetoothAlwaysUsageDescription</key>
   <string>Nexo usa Bluetooth para mostrar tus dispositivos, su batería y conectarlos, y para encontrar y manejar luces Bluetooth cuando tú lo pides.</string>
-  <!-- Casa: "Buscar aparatos" encuentra luces, teles y Home Assistant en tu red (solo cuando lo pides). -->
+  <!-- Casa: "Buscar aparatos" y "Tu red" encuentran luces, enchufes, teles y Home Assistant en tu red (solo cuando lo pides). -->
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Nexo busca luces, enchufes, teles y Home Assistant en tu red de casa cuando tocas «Buscar aparatos», y los maneja sin pasar por internet.</string>
+  <string>Nexo busca luces, enchufes, teles y Home Assistant en tu red de casa cuando tocas «Buscar aparatos» o «Tu red», y los maneja sin pasar por internet.</string>
   <key>NSBonjourServices</key>
   <array>
     <string>_home-assistant._tcp</string>
@@ -19,8 +19,22 @@
     <string>_matter._tcp</string>
     <string>_shelly._tcp</string>
     <string>_esphomelib._tcp</string>
+    <string>_nanoleafapi._tcp</string>
+    <string>_elg._tcp</string>
+    <string>_wled._tcp</string>
+    <string>_http._tcp</string>
+    <string>_companion-link._tcp</string>
+    <string>_raop._tcp</string>
+    <string>_ipp._tcp</string>
+    <string>_printer._tcp</string>
+    <string>_spotify-connect._tcp</string>
+    <string>_sonos._tcp</string>
+    <string>_amzn-wplay._tcp</string>
+    <string>_smb._tcp</string>
+    <string>_workstation._tcp</string>
   </array>
-  <!-- Home Assistant en la red de casa o por Tailscale suele ir por http://: solo direcciones locales e IP. -->
+  <!-- Home Assistant en la red de casa o por Tailscale suele ir por http://: solo direcciones locales e IP.
+       El puente Hue va por https:// con su certificado fijado (lo decide Nexo, ver hogar/http.rs). -->
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>

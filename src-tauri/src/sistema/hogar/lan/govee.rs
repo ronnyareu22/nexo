@@ -123,6 +123,7 @@ pub fn hallazgo(l: &Luz, estado: Option<EstadoAparato>) -> Hallazgo {
         nombre: if l.sku.is_empty() { base.into() } else { format!("{base} {}", l.sku) },
         modelo: Some(l.sku.clone()).filter(|s| !s.is_empty()),
         direccion: Some(l.ip.to_string()),
+        mac: None,
         senal: None,
         version: l.version.clone(),
         capacidades: Capacidades::luz(true, true, true),

@@ -172,6 +172,7 @@ pub fn hallazgo(l: &Luz) -> Hallazgo {
         nombre: l.nombre.clone().unwrap_or_else(|| generico.into()),
         modelo: Some(l.modelo.clone()).filter(|m| !m.is_empty()),
         direccion: Some(direccion),
+        mac: None,
         senal: None,
         version: l.version.clone(),
         capacidades: capacidades(&l.soporte),

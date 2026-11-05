@@ -68,10 +68,20 @@ pub enum Proveedor {
     Yeelight,
     /// Govee por la red local (necesita «LAN Control» en su app).
     Govee,
-    /// Puente Philips Hue (por ahora, solo se detecta).
+    /// Puente Philips Hue por la red local (HTTPS con su certificado fijado; se vincula con su botón).
     Hue,
-    /// LIFX por la red local (por ahora, solo se detecta).
+    /// LIFX por la red local (UDP 56700, sin clave).
     Lifx,
+    /// Shelly por la red local (HTTP; Gen1 con Basic, Gen2 en adelante con Digest si tiene contraseña).
+    Shelly,
+    /// Nanoleaf por la red local (HTTP 16021; se vincula manteniendo su botón de encendido).
+    Nanoleaf,
+    /// Elgato Key Light y Light Strip por la red local (HTTP 9123, sin clave).
+    Elgato,
+    /// Tiras WLED por la red local (API JSON, sin clave).
+    Wled,
+    /// Tasmota y OpenBeken (aparatos Tuya con firmware abierto): `cm?cmnd=` por HTTP.
+    Tasmota,
     /// Tiras Bluetooth tipo ELK-BLEDOM / duoCo / Lotus Lantern (servicio FFF0).
     BleElk,
     /// Tiras Bluetooth tipo Triones / Happy Lighting / Magic Home (servicio FFD5).
@@ -98,15 +108,36 @@ impl Proveedor {
                 Clase::Cortina,
                 Clase::Clima,
             ],
-            Proveedor::Wiz => &[Clase::Luz, Clase::Enchufe],
-            Proveedor::Yeelight | Proveedor::Govee | Proveedor::BleElk | Proveedor::BleTriones => &[Clase::Luz],
-            Proveedor::Hue | Proveedor::Lifx | Proveedor::Ninguno => &[],
+            Proveedor::Wiz | Proveedor::Hue | Proveedor::Shelly | Proveedor::Tasmota => &[Clase::Luz, Clase::Enchufe],
+            Proveedor::Yeelight
+            | Proveedor::Govee
+            | Proveedor::Lifx
+            | Proveedor::Nanoleaf
+            | Proveedor::Elgato
+            | Proveedor::Wled
+            | Proveedor::BleElk
+            | Proveedor::BleTriones => &[Clase::Luz],
+            Proveedor::Ninguno => &[],
         }
     }
 
     /// Lo maneja por la red local o por Bluetooth (sin nube).
     pub fn es_local(self) -> bool {
-        matches!(self, Proveedor::Wiz | Proveedor::Yeelight | Proveedor::Govee | Proveedor::BleElk | Proveedor::BleTriones)
+        matches!(
+            self,
+            Proveedor::Wiz
+                | Proveedor::Yeelight
+                | Proveedor::Govee
+                | Proveedor::Hue
+                | Proveedor::Lifx
+                | Proveedor::Shelly
+                | Proveedor::Nanoleaf
+                | Proveedor::Elgato
+                | Proveedor::Wled
+                | Proveedor::Tasmota
+                | Proveedor::BleElk
+                | Proveedor::BleTriones
+        )
     }
 
     pub fn por_bluetooth(self) -> bool {
@@ -469,6 +500,19 @@ pub enum Manejo {
     Pronto { motivo: String },
     /// Un Home Assistant en la red: se conecta en Ajustes › Casa con un token (la dirección ya va puesta).
     HomeAssistant { url: String },
+    /// Se vincula una vez: con el botón del aparato (Hue, Nanoleaf) o con su contraseña (Shelly, Tasmota).
+    /// `paso` es la instrucción en palabras.
+    Vincular { forma: FormaVinculo, paso: String },
+}
+
+/// Cómo se vincula algo encontrado.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FormaVinculo {
+    /// Se presiona (o se mantiene) un botón del aparato y Nexo pide la clave unos segundos.
+    Boton,
+    /// La persona escribe la contraseña que le puso al aparato.
+    Clave,
 }
 
 /// Algo encontrado en una búsqueda (por la red, por Bluetooth o en la nube).
@@ -490,6 +534,9 @@ pub struct Hallazgo {
     /// La IP ("192.168.1.40") o el Bluetooth (en la Mac, el identificador del sistema; en Windows, la dirección).
     #[serde(default)]
     pub direccion: Option<String>,
+    /// La MAC ("a4:2b:b0:12:34:56"), si se sabe: con ella se vuelve a encontrar si cambia de IP.
+    #[serde(default)]
+    pub mac: Option<String>,
     /// Señal en dBm (Bluetooth y WiZ).
     #[serde(default)]
     pub senal: Option<i16>,
@@ -579,6 +626,16 @@ pub fn hsv_de(r: u8, g: u8, b: u8) -> Hsv {
     };
     let s = if max == 0.0 { 0.0 } else { d / max };
     Hsv::nuevo(h.round() as i64, (s * 100.0).round() as i64, (max * 100.0).round() as i64)
+}
+
+/// Una MAC en la forma de Nexo ("a4:2b:b0:12:34:56"), venga como venga ("A42BB0123456", "A4-2B-…").
+pub fn mac_normal(t: &str) -> Option<String> {
+    let hex: String = t.chars().filter(|c| c.is_ascii_hexdigit()).collect::<String>().to_ascii_lowercase();
+    let sobra = t.chars().any(|c| !c.is_ascii_hexdigit() && !matches!(c, ':' | '-' | '.' | ' '));
+    if hex.len() != 12 || sobra || hex == "000000000000" || hex == "ffffffffffff" {
+        return None;
+    }
+    Some(hex.as_bytes().chunks(2).map(|p| std::str::from_utf8(p).unwrap_or("00")).collect::<Vec<_>>().join(":"))
 }
 
 /// Sin tildes, en minúsculas y con un solo espacio: para comparar nombres ("Lámpara" = "lampara").
@@ -678,6 +735,15 @@ mod pruebas {
     }
 
     #[test]
+    fn hogar_macs() {
+        assert_eq!(mac_normal("A8BB50D2C3E4").as_deref(), Some("a8:bb:50:d2:c3:e4"));
+        assert_eq!(mac_normal("3C-6A-9D-26-6E-8C").as_deref(), Some("3c:6a:9d:26:6e:8c"));
+        assert_eq!(mac_normal("0:1:2:3:4:5"), None);
+        assert_eq!(mac_normal("ff:ff:ff:ff:ff:ff"), None);
+        assert_eq!(mac_normal("shelly-a8bb50d2c3e4"), None);
+    }
+
+    #[test]
     fn hogar_nombres_sin_tildes() {
         assert_eq!(normalizar("  La LÁMPARA  del Escritorio!"), "la lampara del escritorio");
         assert_eq!(normalizar("Baño · Ñandú"), "bano nandu");
@@ -695,5 +761,8 @@ mod pruebas {
         assert_eq!(todas, Destino::Todos { clase: Some(Clase::Luz) });
         assert_eq!(serde_json::to_string(&Clase::SensorPuerta).unwrap_or_default(), r#""sensorPuerta""#);
         assert_eq!(serde_json::to_string(&Manejo::Listo).unwrap_or_default(), r#"{"tipo":"listo"}"#);
+        let v = Manejo::Vincular { forma: FormaVinculo::Boton, paso: "Presiona el botón.".into() };
+        assert_eq!(serde_json::to_string(&v).unwrap_or_default(), r#"{"tipo":"vincular","forma":"boton","paso":"Presiona el botón."}"#);
+        assert_eq!(serde_json::to_string(&Proveedor::Wled).unwrap_or_default(), r#""wled""#);
     }
 }
